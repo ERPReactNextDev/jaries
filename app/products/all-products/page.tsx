@@ -1236,7 +1236,7 @@ function ReadOnlyProductCard({
   return (
     <motion.div
       variants={listItemVariants}
-      className="bg-white/5 border border-white/10 rounded-[20px] p-4 hover:bg-white/[0.08] hover:border-[#d11a2a]/20 transition-all relative overflow-hidden group"
+      className="bg-white/5 border border-white/10 rounded-4xl p-4 hover:bg-white/8 hover:border-[#d11a2a]/20 transition-all relative overflow-hidden group"
     >
       {/* Red accent glow on hover */}
       <div className="absolute -bottom-10 -right-10 w-28 h-28 bg-[#d11a2a]/5 blur-3xl rounded-full opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
@@ -1420,7 +1420,7 @@ function ReadOnlyFilterPanel({
                     key={fam || "all"}
                     type="button"
                     onClick={() => { onFamilyChange(fam); onClose(); }}
-                    className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl border transition-all text-left ${isActive ? "border-[#d11a2a]/50 bg-[#d11a2a]/10 text-white" : "border-white/10 bg-white/5 text-gray-400 hover:text-white hover:bg-white/[0.08]"}`}
+                    className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl border transition-all text-left ${isActive ? "border-[#d11a2a]/50 bg-[#d11a2a]/10 text-white" : "border-white/10 bg-white/5 text-gray-400 hover:text-white hover:bg-white/8"}`}
                   >
                     <span className="text-[11px] font-black uppercase truncate">
                       {label}
@@ -1842,7 +1842,7 @@ function ReadOnlyAllProductsView() {
               <button
                 key={label}
                 type="button"
-                className={`flex flex-col items-center gap-1 px-5 py-2 rounded-2xl transition-all flex-1 max-w-[80px] ${
+                className={`flex flex-col items-center gap-1 px-5 py-2 rounded-2xl transition-all flex-1 max-w-20 ${
                   active
                     ? "bg-[#d11a2a]/10 text-[#d11a2a]"
                     : "text-gray-600 hover:text-white"
