@@ -1917,6 +1917,11 @@ function FullAllProductsView() {
     React.useState<VisibilityState>({});
   const [rowSelection, setRowSelection] = React.useState({});
   const [globalFilter, setGlobalFilter] = React.useState("");
+  const [usageFilter, setUsageFilter] = React.useState("");
+  const [familyFilter, setFamilyFilter] = React.useState("");
+  const [classFilters, setClassFilters] = React.useState<
+    ("spf" | "standard" | "non-standard" | "usl")[]
+  >([]);
   const [rowsPerPageInput, setRowsPerPageInput] = React.useState("10");
 
   const [showSuggestions, setShowSuggestions] = React.useState(false);
@@ -2028,23 +2033,84 @@ function FullAllProductsView() {
 
   // Client-side search across itemDescription, all item codes, and name
   const filteredData = React.useMemo(() => {
-    let items = data as unknown as Product[];
-    const q = globalFilter.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter((p) => {
-      if ((p.itemDescription || p.name || "").toLowerCase().includes(q))
+    try {
+      const results = data.filter((p) => {
+        // 1. Usage Filter
+        if (usageFilter) {
+          const usages = Array.isArray(p.productUsage) ? p.productUsage : [];
+          if (
+            !usages.some(
+              (u) => u.toUpperCase() === usageFilter.toUpperCase(),
+            )
+          )
+            return false;
+        }
+
+        // 2. Family Filter
+        if (familyFilter) {
+          const fam = p.productFamily || (p.categories as string) || "";
+          if (fam !== familyFilter) return false;
+        }
+
+        // 3. Class Filter
+        if (classFilters.length > 0) {
+          if (!classFilters.includes(p.productClass as any)) return false;
+        }
+
+        // 4. Date Filter (Recent 12h)
+        if (sortOption === "recent-12h") {
+          const ts =
+            p.createdAt?.toMillis?.() ??
+            (typeof p.createdAt === "number" ? p.createdAt : 0);
+          const twelveHoursAgo = Date.now() - 12 * 60 * 60 * 1000;
+          if (ts < twelveHoursAgo) return false;
+        }
+
+        // 5. Search Filter
+        const q = globalFilter.trim().toLowerCase();
+        if (q) {
+          const descMatch = (p.itemDescription || p.name || "")
+            .toLowerCase()
+            .includes(q);
+          const litMatch = (p.litItemCode || "").toLowerCase().includes(q);
+          const ecoMatch = (p.ecoItemCode || "").toLowerCase().includes(q);
+          const itemMatch = (p.itemCode || "").toLowerCase().includes(q);
+
+          let codeMatch = false;
+          if (p.itemCodes) {
+            const codes = getFilledItemCodes(p.itemCodes);
+            codeMatch = codes.some(({ code }) =>
+              code.toLowerCase().includes(q),
+            );
+          }
+
+          if (
+            !descMatch &&
+            !litMatch &&
+            !ecoMatch &&
+            !itemMatch &&
+            !codeMatch
+          )
+            return false;
+        }
+
         return true;
-      if ((p.litItemCode || "").toLowerCase().includes(q)) return true;
-      if ((p.ecoItemCode || "").toLowerCase().includes(q)) return true;
-      if ((p.itemCode || "").toLowerCase().includes(q)) return true;
-      if (p.itemCodes) {
-        const codes = getFilledItemCodes(p.itemCodes);
-        if (codes.some(({ code }) => code.toLowerCase().includes(q)))
-          return true;
-      }
-      return false;
-    });
-  }, [data, globalFilter]);
+      });
+
+      console.log(`[Filtering] Applied. In: ${data.length}, Out: ${results.length}`, {
+        globalFilter,
+        usageFilter,
+        familyFilter,
+        classFilters,
+        sortOption,
+      });
+
+      return results;
+    } catch (error) {
+      console.error("[Filtering] Error applying filters:", error);
+      return data;
+    }
+  }, [data, globalFilter, usageFilter, familyFilter, classFilters, sortOption]);
 
   const [familySearch, setFamilySearch] = React.useState("");
 
@@ -2958,17 +3024,17 @@ function FullAllProductsView() {
 
   // FIX 2: These two derivations now appear AFTER `table` is initialised above,
   // eliminating TS2448 ("used before its declaration") and TS2454 ("used before assigned").
-  const activeFamilyFilter = (table.getColumn("productFamilyFilter")?.getFilterValue() as string) ?? "";
-  const activeUsageFilter = (table.getColumn("productUsage")?.getFilterValue() as string) ?? "";
-  const activeClassFilter = (table.getColumn("productClass")?.getFilterValue() as string[]) ?? [];
+  const activeFamilyFilter = familyFilter;
+  const activeUsageFilter = usageFilter;
+  const activeClassFilter = classFilters;
 
   const selectedCount = Object.keys(rowSelection).length;
-  const totalCount = data.length;
+  const totalCount = filteredData.length;
   const isFiltered =
     Boolean(globalFilter.trim()) ||
-    Boolean(activeFamilyFilter) ||
-    Boolean(activeUsageFilter) ||
-    Boolean(activeClassFilter) ||
+    Boolean(familyFilter) ||
+    Boolean(usageFilter) ||
+    classFilters.length > 0 ||
     sortOption === "recent-12h";
 
   const renderEditMode = () => (
@@ -3229,7 +3295,7 @@ function FullAllProductsView() {
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-60">
             <DropdownMenuItem
-              onClick={() => table.getColumn("productClass")?.setFilterValue([])}
+              onClick={() => setClassFilters([])}
               className="flex items-center justify-between"
             >
               <span>All Classes</span>
@@ -3251,7 +3317,7 @@ function FullAllProductsView() {
                     const next = isSelected
                       ? activeClassFilter.filter((v) => v !== option.value)
                       : [...activeClassFilter, option.value];
-                    table.getColumn("productClass")?.setFilterValue(next);
+                    setClassFilters(next);
                   }}
                   className="flex items-center justify-between"
                 >
@@ -3314,7 +3380,7 @@ function FullAllProductsView() {
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
             <DropdownMenuItem
-              onClick={() => table.getColumn("productUsage")?.setFilterValue("")}
+              onClick={() => setUsageFilter("")}
               className="flex items-center justify-between"
             >
               <span>All Usage</span>
@@ -3349,9 +3415,7 @@ function FullAllProductsView() {
               <DropdownMenuItem
                 key={key}
                 onClick={() =>
-                  table
-                    .getColumn("productUsage")
-                    ?.setFilterValue(activeUsageFilter === key ? "" : key)
+                  setUsageFilter(activeUsageFilter === key ? "" : key)
                 }
                 className="flex items-center justify-between"
               >
@@ -3418,9 +3482,7 @@ function FullAllProductsView() {
             </div>
             <div className="max-h-64 overflow-y-auto overflow-x-hidden py-1">
               <DropdownMenuItem
-                onClick={() =>
-                  table.getColumn("productFamilyFilter")?.setFilterValue("")
-                }
+                onClick={() => setFamilyFilter("")}
                 className="flex items-center justify-between"
               >
                 <span className="text-muted-foreground italic">
@@ -3448,11 +3510,9 @@ function FullAllProductsView() {
                   <DropdownMenuItem
                     key={family}
                     onClick={() =>
-                      table
-                        .getColumn("productFamilyFilter")
-                        ?.setFilterValue(
-                          activeFamilyFilter === family ? "" : family,
-                        )
+                      setFamilyFilter(
+                        activeFamilyFilter === family ? "" : family,
+                      )
                     }
                     className="flex items-center gap-2 w-full overflow-hidden"
                   >
@@ -3595,9 +3655,7 @@ function FullAllProductsView() {
                 <button
                   type="button"
                   onClick={() =>
-                    table
-                      .getColumn("productClass")
-                      ?.setFilterValue(activeClassFilter.filter((v) => v !== cls))
+                    setClassFilters(activeClassFilter.filter((v) => v !== cls))
                   }
                   className="ml-0.5 hover:opacity-60 transition-opacity"
                 >
@@ -3612,9 +3670,7 @@ function FullAllProductsView() {
               {activeFamilyFilter}
               <button
                 type="button"
-                onClick={() =>
-                  table.getColumn("productFamilyFilter")?.setFilterValue("")
-                }
+                onClick={() => setFamilyFilter("")}
                 className="ml-0.5 hover:text-destructive transition-colors"
               >
                 <X className="h-3 w-3" />
@@ -3636,9 +3692,7 @@ function FullAllProductsView() {
                 activeUsageFilter.slice(1).toLowerCase()}
               <button
                 type="button"
-                onClick={() =>
-                  table.getColumn("productUsage")?.setFilterValue("")
-                }
+                onClick={() => setUsageFilter("")}
                 className="ml-0.5 hover:opacity-60 transition-opacity"
               >
                 <X className="h-3 w-3" />
