@@ -1,34 +1,12 @@
 "use client";
 /**
  * lib/useProductWorkflow.ts
- * ─────────────────────────────────────────────────────────────────────────────
- * RBAC-aware hook for ALL product write operations.
- *
- * Exported functions:
- *   submitProductUpdate        – edit product fields
- *   submitProductDelete        – soft-delete to recycle_bin
- *   submitProductAssignWebsite – assign websites (incl. schema transform)
- *   submitProductSetClass      – set productClass (spf | standard)
- *
- * Rules:
- *   verify:products | verify:* | superadmin  → direct write + auto-approved audit request
- *   write:products (no verify)               → pending request only
- *
- * Product schema conventions:
- *   Primary name : itemDescription  (falls back to name)
- *   Item codes   : litItemCode, ecoItemCode  (falls back to itemCode)
- *
- * FIX (v2): submitProductDelete now re-reads the user's Firestore document to
- * validate verify permission at execution time, not just from the cached session
- * cookie.  This prevents stale or mis-set scopeAccess values from bypassing the
- * approval workflow for PD Engineers.
- * ─────────────────────────────────────────────────────────────────────────────
  */
 
 import { useCallback } from "react";
 import {
   doc,
-  getDoc, // ← added for server-side re-validation
+  getDoc,
   updateDoc,
   writeBatch,
   serverTimestamp,
@@ -37,10 +15,11 @@ import {
   where,
   getDocs,
   arrayUnion,
-} from "firebase/firestore";
+} from "@firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/useAuth";
-import { hasAccess, getScopeAccessForRole } from "@/lib/rbac"; // ← getScopeAccessForRole added
+import { hasAccess, getScopeAccessForRole } from "@/lib/rbac";
+import { sanitizeDocument } from "@/lib/firestore-sanitize";
 import {
   createRequest,
   approveRequest,
@@ -79,7 +58,6 @@ interface SubmitDeleteOptions {
 interface SubmitAssignWebsiteOptions {
   product: Record<string, any> & { id: string };
   websites: string[];
-  /** Pre-built schema-transformed fields (Taskflow / Shopify only) */
   transformedFields?: Record<string, any>;
   originPage?: string;
   source?: string;
@@ -87,7 +65,7 @@ interface SubmitAssignWebsiteOptions {
 
 interface SubmitSetProductClassOptions {
   product: Record<string, any> & { id: string };
-  productClass: "spf" | "standard";
+  productClass: "spf" | "standard" | "non-standard" | "usl";
   originPage?: string;
   source?: string;
 }
@@ -109,22 +87,6 @@ async function getExistingPendingRequest(
   return snap.empty ? null : snap.docs[0].id;
 }
 
-/**
- * fetchServerCanVerify
- * ─────────────────────────────────────────────────────────────────────────────
- * Re-reads the caller's Firestore `adminaccount` document to determine their
- * CURRENT verify:products permission — the authoritative source of truth.
- *
- * Why this exists:
- *   The session cookie stores scopeAccess at login time.  If a user's role or
- *   scopes were updated in Firestore after their last login, the cookie can be
- *   stale.  A PD Engineer whose cookie incorrectly contains "verify:products"
- *   (e.g., from a prior role) would bypass the approval workflow without this
- *   check.
- *
- * Fail-safe: returns false on any Firestore error so that uncertain users are
- * always routed through the approval queue, never given silent direct access.
- */
 async function fetchServerCanVerify(uid: string): Promise<boolean> {
   try {
     const snap = await getDoc(doc(db, "adminaccount", uid));
@@ -146,7 +108,6 @@ async function fetchServerCanVerify(uid: string): Promise<boolean> {
       scopes.includes("verify:products")
     );
   } catch (err) {
-    // Fail-safe: if Firestore read fails, deny privileged path.
     console.warn("[useProductWorkflow] fetchServerCanVerify failed:", err);
     return false;
   }
@@ -265,7 +226,17 @@ export function useProductWorkflow() {
         originPage = "/products",
         source = "product-page:delete",
       } = opts;
-      const { id: productId, ...productSnapshot } = product;
+      const { id: productId, ...rawSnapshot } = product;
+
+      // ── CRITICAL: sanitize the snapshot before any Firestore write ─────────
+      // Spreading a product document directly can include `undefined` values for
+      // optional fields (e.g. `brands`, `websites`). Firestore rejects these with:
+      // "Unsupported field value: undefined"
+      // sanitizeDocument removes all undefined keys recursively.
+      const productSnapshot = sanitizeDocument(
+        rawSnapshot as Record<string, unknown>,
+      ) as Record<string, any>;
+
       const productName = resolveProductName(productSnapshot, productId);
       const reviewer = { uid: user.uid, name: user.name };
 
@@ -276,29 +247,28 @@ export function useProductWorkflow() {
         originPage,
       };
 
-      const deletePayload = {
+      const deletePayload = sanitizeDocument({
         productSnapshot,
         deletedBy: { uid: user.uid, name: user.name, role: user.role },
         originPage,
-      };
+      }) as Record<string, any>;
 
-      // ── AUTHORITATIVE server-side verify check ──────────────────────────
-      // Re-read the user's Firestore document here instead of trusting the
-      // cached session cookie.  This is the critical guard that ensures a
-      // PD Engineer (write:products only) cannot bypass the approval queue
-      // due to a stale or incorrect scopeAccess in their session.
+      // Authoritative server-side verify check
       const serverCanVerify = await fetchServerCanVerify(user.uid);
 
       if (serverCanVerify) {
-        // ── Privileged path: direct soft-delete ──────────────────────────
         const batch = writeBatch(db);
-        batch.set(doc(db, "recycle_bin", productId), {
+
+        // Sanitize the entire recycle_bin document before writing
+        const recycleBinDoc = sanitizeDocument({
           ...productSnapshot,
           originalCollection: "products",
           originPage,
           deletedAt: serverTimestamp(),
           deletedBy: { uid: user.uid, name: user.name, role: user.role },
-        });
+        }) as Record<string, any>;
+
+        batch.set(doc(db, "recycle_bin", productId), recycleBinDoc);
         batch.delete(doc(db, "products", productId));
         await batch.commit();
 
@@ -327,7 +297,6 @@ export function useProductWorkflow() {
           message: `"${productName}" moved to recycle bin.`,
         };
       } else {
-        // ── Restricted path: create pending request ───────────────────────
         const pendingUpdate = await getExistingPendingRequest(
           productId,
           "update",
@@ -369,15 +338,6 @@ export function useProductWorkflow() {
   );
 
   // ── submitProductAssignWebsite ────────────────────────────────────────────
-  /**
-   * Assigns one or more websites to a single product.
-   *
-   * The payload is always stored as { before, after } so that executeRequest
-   * (via approveRequest) can apply payload.after correctly on approval.
-   *
-   * "after" includes the merged websites array + any transformedFields.
-   * transformedFields is only supplied for schema-transform sites (Taskflow, Shopify).
-   */
   const submitProductAssignWebsite = useCallback(
     async (opts: SubmitAssignWebsiteOptions): Promise<WorkflowResult> => {
       if (!user) throw new Error("Not authenticated");
@@ -398,7 +358,6 @@ export function useProductWorkflow() {
       const productName = resolveProductName(productSnapshot, productId);
       const reviewer = { uid: user.uid, name: user.name };
 
-      // Build merged websites array (the "after" state).
       const existingWebsites: string[] = Array.isArray(productSnapshot.websites)
         ? productSnapshot.websites
         : Array.isArray(productSnapshot.website)
@@ -411,14 +370,13 @@ export function useProductWorkflow() {
         new Set([...existingWebsites, ...websites]),
       );
 
-      // "after" = what the doc will look like — used by executeRequest on approval.
-      const after: Record<string, any> = {
+      const after: Record<string, any> = sanitizeDocument({
         ...productSnapshot,
         websites: mergedWebsites,
         website: mergedWebsites,
         updatedAt: serverTimestamp(),
         ...(transformedFields ?? {}),
-      };
+      }) as Record<string, any>;
 
       const meta = {
         ...resolveProductMeta(productSnapshot),
@@ -430,7 +388,6 @@ export function useProductWorkflow() {
       };
 
       if (canVerify()) {
-        // Privileged: write directly, then create auto-approved audit request.
         const batch = writeBatch(db);
         const ref = doc(db, "products", productId);
 
@@ -441,7 +398,9 @@ export function useProductWorkflow() {
         });
 
         if (transformedFields && Object.keys(transformedFields).length > 0) {
-          batch.set(ref, transformedFields, { merge: true });
+          batch.set(ref, sanitizeDocument(transformedFields) as any, {
+            merge: true,
+          });
         }
 
         await batch.commit();
@@ -472,7 +431,6 @@ export function useProductWorkflow() {
           message: `Assigned to ${websites.join(", ")}.`,
         };
       } else {
-        // Restricted: create a pending request. No Firestore write yet.
         const existing = await getExistingPendingRequest(productId, "update");
         if (existing) {
           throw new Error(
@@ -501,10 +459,6 @@ export function useProductWorkflow() {
   );
 
   // ── submitProductSetClass ─────────────────────────────────────────────────
-  /**
-   * Sets productClass ("spf" | "standard") on a single product.
-   * Privileged users → direct write. Others → pending request.
-   */
   const submitProductSetClass = useCallback(
     async (opts: SubmitSetProductClassOptions): Promise<WorkflowResult> => {
       if (!user) throw new Error("Not authenticated");
@@ -522,11 +476,11 @@ export function useProductWorkflow() {
       const productName = resolveProductName(productSnapshot, productId);
       const reviewer = { uid: user.uid, name: user.name };
 
-      const after = {
+      const after = sanitizeDocument({
         ...productSnapshot,
         productClass,
         updatedAt: serverTimestamp(),
-      };
+      }) as Record<string, any>;
 
       const meta = {
         ...resolveProductMeta(productSnapshot),

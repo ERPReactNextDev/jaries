@@ -35,6 +35,7 @@ import {
   Timestamp,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { sanitizeDocument } from "@/lib/firestore-sanitize";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -340,14 +341,16 @@ export async function executeRequest(request: PendingRequest): Promise<void> {
         if (snapshot) {
           const { writeBatch: makeBatch } = await import("firebase/firestore");
           const batch = makeBatch(db);
-
-          batch.set(doc(db, "recycle_bin", resourceId), {
-            ...snapshot,
+          const sanitizedSnapshot = sanitizeDocument(snapshot);
+          const recycleBinPayload = sanitizeDocument({
+            ...sanitizedSnapshot,
             originalCollection: "products",
             originPage: payload.originPage ?? "/products",
             deletedAt: serverTimestamp(),
             deletedBy: payload.deletedBy ?? null,
           });
+
+          batch.set(doc(db, "recycle_bin", resourceId), recycleBinPayload);
 
           batch.delete(doc(db, "products", resourceId));
           await batch.commit();

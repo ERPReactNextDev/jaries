@@ -56,6 +56,7 @@ import {
   Pencil,
   Download,
   ExternalLink,
+  CircleDashed,
   FolderPlus,
 } from "lucide-react";
 
@@ -797,6 +798,16 @@ const PRODUCT_CLASS_OPTIONS: {
     value: "standard",
     label: "Standard Items",
     icon: <Package className="w-4 h-4" />,
+  },
+  {
+    value: "non-standard",
+    label: "Non-Standard",
+    icon: <CircleDashed className="w-4 h-4" />,
+  },
+  {
+    value: "usl",
+    label: "USL",
+    icon: <AlertCircle className="w-4 h-4" />,
   },
 ];
 

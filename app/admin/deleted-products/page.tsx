@@ -65,6 +65,7 @@ import {
   doc,
 } from "firebase/firestore";
 import { logAuditEvent } from "@/lib/logger";
+import { sanitizeDocument } from "@/lib/firestore-sanitize";
 import { ProtectedLayout } from "@/components/layouts/protected-layout";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { NotificationsDropdown } from "@/components/notifications/notifications-dropdown";
@@ -668,7 +669,10 @@ export default function RecycleBinPage() {
       originPage,
       ...originalData
     } = item;
-    batch.set(doc(db, targetCollection, id), originalData);
+    batch.set(
+      doc(db, targetCollection, id),
+      sanitizeDocument(originalData as Record<string, unknown>),
+    );
     batch.delete(doc(db, "recycle_bin", id));
     await batch.commit();
 
@@ -741,7 +745,10 @@ export default function RecycleBinPage() {
             originPage,
             ...originalData
           } = item;
-          batch.set(doc(db, targetCollection, id), originalData);
+          batch.set(
+            doc(db, targetCollection, id),
+            sanitizeDocument(originalData as Record<string, unknown>),
+          );
           batch.delete(doc(db, "recycle_bin", id));
         });
         await batch.commit();

@@ -134,7 +134,6 @@ import {
   doc,
   writeBatch,
   serverTimestamp,
-  where,
   arrayUnion,
   updateDoc,
 } from "firebase/firestore";
@@ -180,7 +179,7 @@ export type Product = {
   itemCodes?: ItemCodes;
   ecoItemCode: string;
   litItemCode: string;
-  productClass: "spf" | "standard" | "";
+  productClass: "spf" | "standard" | "non-standard" | "usl" | "";
   name: string;
   itemCode: string;
   mainImage: string;
@@ -323,6 +322,42 @@ function buildTransformedProduct(product: Product, newWebsites: string[]) {
   };
 }
 
+function useAllProductsCollection() {
+  const [data, setData] = React.useState<Product[]>([]);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    setLoading(true);
+
+    const productsQuery = query(
+      collection(db, "products"),
+      orderBy("createdAt", "desc"),
+    );
+
+    const unsubscribe = onSnapshot(
+      productsQuery,
+      (snapshot) => {
+        setData(
+          snapshot.docs.map((productDoc) => ({
+            id: productDoc.id,
+            ...productDoc.data(),
+          })) as Product[],
+        );
+        setLoading(false);
+      },
+      (error) => {
+        console.error("Failed to load products:", error);
+        toast.error("Failed to load products");
+        setLoading(false);
+      },
+    );
+
+    return unsubscribe;
+  }, []);
+
+  return { data, loading };
+}
+
 // ─── Constants (PRESERVED) ────────────────────────────────────────────────────
 
 const SCHEMA_TRANSFORM_WEBSITES = new Set(["Taskflow", "Shopify"]);
@@ -376,7 +411,7 @@ const WEBSITE_OPTIONS = [
 ];
 
 const PRODUCT_CLASS_OPTIONS: {
-  value: "spf" | "standard";
+  value: "spf" | "standard" | "non-standard" | "usl";
   label: string;
   description: string;
   icon: React.ReactNode;
@@ -401,6 +436,24 @@ const PRODUCT_CLASS_OPTIONS: {
     color: "bg-slate-50 border-slate-200 text-slate-700",
     activeColor: "bg-slate-100 border-slate-500 text-slate-800",
     dot: "bg-slate-500",
+  },
+  {
+    value: "non-standard",
+    label: "Non-Standard",
+    description: "Custom or non-regular items",
+    icon: <CircleDashed className="w-4 h-4" />,
+    color: "bg-amber-50 border-amber-200 text-amber-700",
+    activeColor: "bg-amber-100 border-amber-500 text-amber-800",
+    dot: "bg-amber-500",
+  },
+  {
+    value: "usl",
+    label: "USL",
+    description: "Unspecified or legacy items",
+    icon: <AlertCircle className="w-4 h-4" />,
+    color: "bg-rose-50 border-rose-200 text-rose-700",
+    activeColor: "bg-rose-100 border-rose-500 text-rose-800",
+    dot: "bg-rose-500",
   },
 ];
 
@@ -439,20 +492,43 @@ const multiValueFilter: FilterFn<Product> = (row, columnId, filterValue) => {
 
 // ─── Badge components (PRESERVED) ────────────────────────────────────────────
 
-function ProductClassBadge({ value }: { value: "spf" | "standard" | "" }) {
+function ProductClassBadge({
+  value,
+}: {
+  value: "spf" | "standard" | "non-standard" | "usl" | "";
+}) {
   if (!value)
     return <span className="text-xs text-muted-foreground/50">—</span>;
+
   if (value === "spf")
     return (
       <Badge className="gap-1 bg-violet-100 text-violet-700 border-violet-200 hover:bg-violet-100 text-[10px] font-semibold">
         <Sparkles className="w-2.5 h-2.5" /> SPF
       </Badge>
     );
-  return (
-    <Badge variant="secondary" className="text-[10px] font-semibold">
-      <Package className="w-2.5 h-2.5 mr-1" /> Standard
-    </Badge>
-  );
+
+  if (value === "standard")
+    return (
+      <Badge variant="secondary" className="text-[10px] font-semibold">
+        <Package className="w-2.5 h-2.5 mr-1" /> Standard
+      </Badge>
+    );
+
+  if (value === "non-standard")
+    return (
+      <Badge className="gap-1 bg-amber-100 text-amber-700 border-amber-200 hover:bg-amber-100 text-[10px] font-semibold">
+        <CircleDashed className="w-2.5 h-2.5" /> Non-Standard
+      </Badge>
+    );
+
+  if (value === "usl")
+    return (
+      <Badge className="gap-1 bg-rose-100 text-rose-700 border-rose-200 hover:bg-rose-100 text-[10px] font-semibold">
+        <AlertCircle className="w-2.5 h-2.5" /> USL
+      </Badge>
+    );
+
+  return <Badge variant="outline">{value}</Badge>;
 }
 
 function ProductUsageBadge({
@@ -514,7 +590,7 @@ function CountPill({
   variant = "default",
 }: {
   count: number;
-  variant?: "default" | "violet" | "amber" | "green" | "sky";
+  variant?: "default" | "violet" | "amber" | "green" | "sky" | "rose";
 }) {
   const styles = {
     default: "text-muted-foreground bg-muted",
@@ -522,6 +598,7 @@ function CountPill({
     amber: "text-amber-700 bg-amber-50 border border-amber-200",
     green: "text-green-700 bg-green-50 border border-green-200",
     sky: "text-sky-700 bg-sky-50 border border-sky-200",
+    rose: "text-rose-700 bg-rose-50 border border-rose-200",
   };
   return (
     <span
@@ -901,9 +978,13 @@ function AssignProductClassDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
   selectedCount: number;
-  onConfirm: (productClass: "spf" | "standard") => Promise<void>;
+  onConfirm: (
+    productClass: "spf" | "standard" | "non-standard" | "usl",
+  ) => Promise<void>;
 }) {
-  const [selectedClass, setSelectedClass] = React.useState<"spf" | "standard" | null>(null);
+  const [selectedClass, setSelectedClass] = React.useState<
+    "spf" | "standard" | "non-standard" | "usl" | null
+  >(null);
   const [isAssigning, setIsAssigning] = React.useState(false);
 
   React.useEffect(() => {
@@ -960,8 +1041,8 @@ function AssignProductClassDialog({
 
         <DialogFooter className="gap-2 sm:gap-2">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isAssigning}>Cancel</Button>
-          <Button onClick={handleConfirm} disabled={!selectedClass || isAssigning} className={`gap-2 ${selectedClass === "spf" ? "bg-violet-600 hover:bg-violet-700 text-white" : ""}`}>
-            {isAssigning ? <><Loader2 className="h-4 w-4 animate-spin" /> Assigning...</> : <><Tag className="h-4 w-4" /> Set as {selectedClass === "spf" ? "SPF" : "Standard"}</>}
+          <Button onClick={handleConfirm} disabled={!selectedClass || isAssigning} className={`gap-2 ${selectedClass ? PRODUCT_CLASS_OPTIONS.find(o => o.value === selectedClass)?.activeColor : ""}`}>
+            {isAssigning ? <><Loader2 className="h-4 w-4 animate-spin" /> Assigning...</> : <><Tag className="h-4 w-4" /> Set as {selectedClass ? PRODUCT_CLASS_OPTIONS.find(o => o.value === selectedClass)?.label : "Class"}</>}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1146,8 +1227,24 @@ function ReadOnlyProductCard({
               <span className="text-[8px] text-gray-600 uppercase font-bold">—</span>
             )}
             {cls && (
-              <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-full border ${cls === "spf" ? "bg-violet-500/20 text-violet-400 border-violet-500/30" : "bg-white/5 text-gray-500 border-white/10"}`}>
-                {cls === "spf" ? "SPF" : "Std"}
+              <span
+                className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-full border ${
+                  cls === "spf"
+                    ? "bg-violet-500/20 text-violet-400 border-violet-500/30"
+                    : cls === "non-standard"
+                      ? "bg-amber-500/20 text-amber-400 border-amber-500/30"
+                      : cls === "usl"
+                        ? "bg-rose-500/20 text-rose-400 border-rose-500/30"
+                        : "bg-white/5 text-gray-500 border-white/10"
+                }`}
+              >
+                {cls === "spf"
+                  ? "SPF"
+                  : cls === "non-standard"
+                    ? "Non-Std"
+                    : cls === "usl"
+                      ? "USL"
+                      : "Std"}
               </span>
             )}
           </div>
@@ -1168,12 +1265,16 @@ function ReadOnlyFilterPanel({
   families,
   activeFamily,
   onFamilyChange,
+  activeClasses,
+  onClassToggle,
 }: {
   open: boolean;
   onClose: () => void;
   families: string[];
   activeFamily: string;
   onFamilyChange: (f: string) => void;
+  activeClasses: string[];
+  onClassToggle: (c: "spf" | "standard" | "non-standard" | "usl") => void;
 }) {
   return (
     <AnimatePresence>
@@ -1191,20 +1292,57 @@ function ReadOnlyFilterPanel({
             animate={{ y: 0 }}
             exit={{ y: "100%" }}
             transition={{ type: "spring", damping: 28, stiffness: 300 }}
-            className="fixed bottom-0 left-0 right-0 z-50 bg-[#0d0d0d] border-t border-white/10 rounded-t-[32px] p-6 pb-10 max-h-[70vh] overflow-y-auto"
+            className="fixed bottom-0 left-0 right-0 z-50 bg-[#0d0d0d] border-t border-white/10 rounded-t-[32px] p-6 pb-10 max-h-[85vh] overflow-y-auto"
           >
             {/* Handle */}
             <div className="w-10 h-1 bg-white/20 rounded-full mx-auto mb-6" />
 
+            {/* Product Class Section */}
+            <div className="mb-8">
+              <div className="flex items-center justify-between mb-4">
+                <p className="text-[11px] font-black uppercase tracking-widest text-[#d11a2a]">
+                  Product Classification
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {PRODUCT_CLASS_OPTIONS.map((opt) => {
+                  const isActive = activeClasses.includes(opt.value);
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => onClassToggle(opt.value)}
+                      className={`flex flex-col gap-2 p-3 rounded-2xl border transition-all text-left ${isActive ? `${opt.activeColor.replace("bg-", "bg-").replace("/100", "/20")} border-white/20` : "border-white/5 bg-white/5 text-gray-500 hover:text-white"}`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className={isActive ? "" : "opacity-50"}>
+                          {opt.icon}
+                        </span>
+                        {isActive && (
+                          <Check size={12} className="text-[#d11a2a]" />
+                        )}
+                      </div>
+                      <span className="text-[10px] font-black uppercase tracking-wider">
+                        {opt.label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Family Section */}
             <div className="flex items-center justify-between mb-5">
               <p className="text-[11px] font-black uppercase tracking-widest text-[#d11a2a]">
                 Filter by Family
               </p>
               <button
-                onClick={() => { onFamilyChange(""); onClose(); }}
+                onClick={() => {
+                  onFamilyChange("");
+                }}
                 className="text-[9px] font-black uppercase text-gray-500 hover:text-white transition-colors"
               >
-                Clear All
+                Clear Family
               </button>
             </div>
 
@@ -1216,7 +1354,9 @@ function ReadOnlyFilterPanel({
                   <button
                     key={fam || "all"}
                     type="button"
-                    onClick={() => { onFamilyChange(fam); onClose(); }}
+                    onClick={() => {
+                      onFamilyChange(fam);
+                    }}
                     className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl border transition-all text-left ${isActive ? "border-[#d11a2a]/50 bg-[#d11a2a]/10 text-white" : "border-white/10 bg-white/5 text-gray-400 hover:text-white hover:bg-white/[0.08]"}`}
                   >
                     <span className="text-[11px] font-black uppercase truncate">
@@ -1240,12 +1380,14 @@ function ReadOnlyFilterPanel({
 
 function ReadOnlyAllProductsView() {
   const { user, logout } = useAuth();
-  const [data, setData] = React.useState<Product[]>([]);
-  const [loading, setLoading] = React.useState(true);
+  const { data, loading } = useAllProductsCollection();
 
   const [search, setSearch] = React.useState("");
   const [usageTab, setUsageTab] = React.useState<UsageFilter>("");
   const [familyFilter, setFamilyFilter] = React.useState("");
+  const [classFilters, setClassFilters] = React.useState<
+    ("spf" | "standard" | "non-standard" | "usl")[]
+  >([]);
   const [filterPanelOpen, setFilterPanelOpen] = React.useState(false);
 
   const PAGE_SIZE = 10;
@@ -1255,67 +1397,6 @@ function ReadOnlyAllProductsView() {
     React.useState<Product | null>(null);
   const [bulkDownloadTdsOpen, setBulkDownloadTdsOpen] =
     React.useState(false);
-
-  React.useEffect(() => {
-    const mergeAndSort = (a: Product[], b: Product[]): Product[] => {
-      const seen = new Set<string>();
-      const merged: Product[] = [];
-      for (const p of [...a, ...b]) {
-        if (!seen.has(p.id)) {
-          seen.add(p.id);
-          merged.push(p);
-        }
-      }
-      merged.sort((x, y) => {
-        const tx = x.createdAt?.toMillis?.() ?? x.createdAt ?? 0;
-        const ty = y.createdAt?.toMillis?.() ?? y.createdAt ?? 0;
-        return ty - tx;
-      });
-      return merged;
-    };
-
-    let assignedData: Product[] = [];
-    let unassignedData: Product[] = [];
-    let assignedReady = false;
-    let unassignedReady = false;
-
-    const flush = () => {
-      if (assignedReady && unassignedReady) {
-        setData(mergeAndSort(assignedData, unassignedData));
-        setLoading(false);
-      }
-    };
-
-    const qAssigned = query(
-      collection(db, "products"),
-      where("websites", "array-contains-any", [
-        "Disruptive Solutions Inc",
-        "Ecoshift Corporation",
-        "Value Acquisitions Holdings",
-        "Taskflow",
-        "Shopify",
-      ]),
-      orderBy("createdAt", "desc"),
-    );
-    const qUnassigned = query(
-      collection(db, "products"),
-      where("websites", "==", []),
-      orderBy("createdAt", "desc"),
-    );
-
-    const unsubA = onSnapshot(qAssigned, (snap) => {
-      assignedData = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as Product[];
-      assignedReady = true;
-      flush();
-    });
-    const unsubU = onSnapshot(qUnassigned, (snap) => {
-      unassignedData = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as Product[];
-      unassignedReady = true;
-      flush();
-    }, () => { unassignedReady = true; flush(); });
-
-    return () => { unsubA(); unsubU(); };
-  }, []);
 
   const uniqueFamilies = React.useMemo(() => {
     const s = new Set<string>();
@@ -1336,6 +1417,9 @@ function ReadOnlyAllProductsView() {
         const fam = p.productFamily || (p.categories as string) || "";
         if (fam !== familyFilter) return false;
       }
+      if (classFilters.length > 0) {
+        if (!classFilters.includes(p.productClass as any)) return false;
+      }
       if (search.trim()) {
         const q = search.toLowerCase();
         const codes = resolveItemCodes(p);
@@ -1355,7 +1439,7 @@ function ReadOnlyAllProductsView() {
 
   React.useEffect(() => {
     setCurrentPage(1);
-  }, [search, usageTab, familyFilter]);
+  }, [search, usageTab, familyFilter, classFilters]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated = filtered.slice(
@@ -1481,13 +1565,15 @@ function ReadOnlyAllProductsView() {
           type="button"
           onClick={() => setFilterPanelOpen(true)}
           className={`shrink-0 flex items-center gap-1.5 px-3 py-2.5 rounded-2xl border text-[10px] font-black uppercase tracking-wider transition-all active:scale-95 ${
-            familyFilter
+            familyFilter || classFilters.length > 0
               ? "bg-[#d11a2a]/10 border-[#d11a2a]/40 text-[#d11a2a]"
               : "bg-white/5 border-white/10 text-gray-500 hover:text-white"
           }`}
         >
           <FilterIcon size={12} />
-          {familyFilter ? "1" : "Filter"}
+          {familyFilter || classFilters.length > 0
+            ? (familyFilter ? 1 : 0) + classFilters.length
+            : "Filter"}
         </button>
 
         <button
@@ -1650,6 +1736,12 @@ function ReadOnlyAllProductsView() {
         families={uniqueFamilies}
         activeFamily={familyFilter}
         onFamilyChange={setFamilyFilter}
+        activeClasses={classFilters}
+        onClassToggle={(c) => {
+          setClassFilters((prev) =>
+            prev.includes(c) ? prev.filter((v) => v !== c) : [...prev, c],
+          );
+        }}
       />
 
       <TdsPreviewDialog
@@ -1671,8 +1763,7 @@ function ReadOnlyAllProductsView() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function FullAllProductsView() {
-  const [data, setData] = React.useState<Product[]>([]);
-  const [loading, setLoading] = React.useState(true);
+  const { data, loading } = useAllProductsCollection();
 
   const [isEditing, setIsEditing] = React.useState(false);
   const [selectedProduct, setSelectedProduct] = React.useState<Product | null>(null);
@@ -1742,63 +1833,6 @@ function FullAllProductsView() {
     }).slice(0, 7);
   }, [data, globalFilter]);
 
-  React.useEffect(() => {
-    setLoading(true);
-    const mergeAndSort = (a: Product[], b: Product[]): Product[] => {
-      const seen = new Set<string>();
-      const merged: Product[] = [];
-      for (const p of [...a, ...b]) {
-        if (!seen.has(p.id)) { seen.add(p.id); merged.push(p); }
-      }
-      merged.sort((x, y) => {
-        const tx = x.createdAt?.toMillis?.() ?? x.createdAt ?? 0;
-        const ty = y.createdAt?.toMillis?.() ?? y.createdAt ?? 0;
-        return ty - tx;
-      });
-      return merged;
-    };
-
-    let assignedData: Product[] = [];
-    let unassignedData: Product[] = [];
-    let assignedReady = false;
-    let unassignedReady = false;
-
-    const flush = () => {
-      if (assignedReady && unassignedReady) {
-        setData(mergeAndSort(assignedData, unassignedData));
-        setLoading(false);
-      }
-    };
-
-    const qAssigned = query(
-      collection(db, "products"),
-      where("websites", "array-contains-any", [
-        "Disruptive Solutions Inc", "Ecoshift Corporation",
-        "Value Acquisitions Holdings", "Taskflow", "Shopify",
-      ]),
-      orderBy("createdAt", "desc"),
-    );
-    const qUnassigned = query(
-      collection(db, "products"),
-      where("websites", "==", []),
-      orderBy("createdAt", "desc"),
-    );
-
-    const unsubAssigned = onSnapshot(qAssigned, (snapshot) => {
-      assignedData = snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as Product[];
-      assignedReady = true;
-      flush();
-    }, (error) => { console.error("Fetch error (assigned):", error); toast.error("Failed to load products"); setLoading(false); });
-
-    const unsubUnassigned = onSnapshot(qUnassigned, (snapshot) => {
-      unassignedData = snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as Product[];
-      unassignedReady = true;
-      flush();
-    }, (error) => { console.warn("Could not fetch unassigned products:", error); unassignedReady = true; flush(); });
-
-    return () => { unsubAssigned(); unsubUnassigned(); };
-  }, []);
-
   // ── All handlers PRESERVED ────────────────────────────────────────────────
 
   const handleSoftDelete = async (product: Product) => {
@@ -1859,12 +1893,18 @@ function FullAllProductsView() {
     setRowSelection({});
   };
 
-  const handleBulkAssignProductClass = async (productClass: "spf" | "standard") => {
+  const handleBulkAssignProductClass = async (
+    productClass: "spf" | "standard" | "non-standard" | "usl",
+  ) => {
     const selectedRows = table.getFilteredSelectedRowModel().rows;
     const rows = selectedRows.map((r) => r.original);
     const count = rows.length;
-    const label = productClass === "spf" ? "SPF" : "Standard";
-    const t = toast.loading(`${isRequestMode ? "Submitting" : "Setting"} ${count} product${count !== 1 ? "s" : ""} to "${label}"...`);
+    const label =
+      PRODUCT_CLASS_OPTIONS.find((o) => o.value === productClass)?.label ||
+      productClass;
+    const t = toast.loading(
+      `${isRequestMode ? "Submitting" : "Setting"} ${count} product${count !== 1 ? "s" : ""} to "${label}"...`,
+    );
     let direct = 0, pending = 0, errors = 0;
     await Promise.all(rows.map(async (product) => {
       try {
@@ -2111,8 +2151,17 @@ function FullAllProductsView() {
   }, [data]);
 
   const productClassCounts = React.useMemo(() => {
-    const m = new Map<string, number>([["spf", 0], ["standard", 0], ["", 0]]);
-    data.forEach((p) => { const cls = p.productClass ?? ""; m.set(cls, (m.get(cls) ?? 0) + 1); });
+    const m = new Map<string, number>([
+      ["spf", 0],
+      ["standard", 0],
+      ["non-standard", 0],
+      ["usl", 0],
+      ["", 0],
+    ]);
+    data.forEach((p) => {
+      const cls = p.productClass ?? "";
+      m.set(cls, (m.get(cls) ?? 0) + 1);
+    });
     return m;
   }, [data]);
 
@@ -2234,8 +2283,27 @@ function FullAllProductsView() {
     {
       accessorKey: "productClass",
       header: () => <div className="text-xs font-medium">Class</div>,
-      cell: ({ row }) => <ProductClassBadge value={row.getValue("productClass") as "spf" | "standard" | ""} />,
-      filterFn: (row, _, filterValue) => { if (!filterValue) return true; return (row.getValue("productClass") as string) === filterValue; },
+      cell: ({ row }) => (
+        <ProductClassBadge
+          value={
+            row.getValue("productClass") as
+              | "spf"
+              | "standard"
+              | "non-standard"
+              | "usl"
+              | ""
+          }
+        />
+      ),
+      filterFn: (row, _, filterValue) => {
+        if (!filterValue || (Array.isArray(filterValue) && filterValue.length === 0))
+          return true;
+        const val = row.getValue("productClass") as string;
+        if (Array.isArray(filterValue)) {
+          return filterValue.includes(val);
+        }
+        return val === filterValue;
+      },
     },
     {
       accessorKey: "productUsage",
@@ -2336,8 +2404,12 @@ function FullAllProductsView() {
 
   // FIX 2: These two derivations now appear AFTER `table` is initialised above,
   // eliminating TS2448 ("used before its declaration") and TS2454 ("used before assigned").
-  const activeFamilyFilter = (table.getColumn("productFamilyFilter")?.getFilterValue() as string) ?? "";
-  const activeUsageFilter = (table.getColumn("productUsage")?.getFilterValue() as string) ?? "";
+  const activeFamilyFilter =
+    (table.getColumn("productFamilyFilter")?.getFilterValue() as string) ?? "";
+  const activeUsageFilter =
+    (table.getColumn("productUsage")?.getFilterValue() as string) ?? "";
+  const activeClassFilter =
+    (table.getColumn("productClass")?.getFilterValue() as string[]) ?? [];
 
   const selectedCount = Object.keys(rowSelection).length;
   const filteredCount = table.getFilteredRowModel().rows.length;
@@ -2463,19 +2535,80 @@ function FullAllProductsView() {
         {/* Product Class filter */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" className="gap-2">Product Class <ChevronDown className="h-4 w-4" /></Button>
+            <Button
+              variant="outline"
+              className={`gap-2 ${activeClassFilter.length > 0 ? "border-primary text-primary bg-primary/5" : ""}`}
+            >
+              <Tag className="h-4 w-4" />
+              {activeClassFilter.length === 0
+                ? "Product Class"
+                : activeClassFilter.length === 1
+                  ? PRODUCT_CLASS_OPTIONS.find(
+                      (o) => o.value === activeClassFilter[0],
+                    )?.label
+                  : `${activeClassFilter.length} Classes`}
+              <ChevronDown className="h-4 w-4" />
+            </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-52">
-            <DropdownMenuItem onClick={() => table.getColumn("productClass")?.setFilterValue("")} className="flex items-center justify-between">
-              <span>All Classes</span><CountPill count={data.length} />
+          <DropdownMenuContent align="end" className="w-60">
+            <DropdownMenuItem
+              onClick={() => table.getColumn("productClass")?.setFilterValue([])}
+              className="flex items-center justify-between"
+            >
+              <span>All Classes</span>
+              <div className="flex items-center gap-1.5">
+                <CountPill count={data.length} />
+                {activeClassFilter.length === 0 && (
+                  <Check className="h-3.5 w-3.5 text-primary" />
+                )}
+              </div>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => table.getColumn("productClass")?.setFilterValue("spf")} className="flex items-center justify-between">
-              <span className="flex items-center gap-2"><Sparkles className="w-3.5 h-3.5 text-violet-500" /> SPF Items</span><CountPill count={productClassCounts.get("spf") ?? 0} variant="violet" />
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => table.getColumn("productClass")?.setFilterValue("standard")} className="flex items-center justify-between">
-              <span className="flex items-center gap-2"><Package className="w-3.5 h-3.5" /> Standard Items</span><CountPill count={productClassCounts.get("standard") ?? 0} />
-            </DropdownMenuItem>
+            {PRODUCT_CLASS_OPTIONS.map((option) => {
+              const isSelected = activeClassFilter.includes(option.value);
+              return (
+                <DropdownMenuItem
+                  key={option.value}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    const next = isSelected
+                      ? activeClassFilter.filter((v) => v !== option.value)
+                      : [...activeClassFilter, option.value];
+                    table.getColumn("productClass")?.setFilterValue(next);
+                  }}
+                  className="flex items-center justify-between"
+                >
+                  <span className="flex items-center gap-2">
+                    {React.isValidElement(option.icon)
+                      ? React.cloneElement(
+                          option.icon as React.ReactElement<any>,
+                          {
+                            className: "w-3.5 h-3.5",
+                          },
+                        )
+                      : null}{" "}
+                    {option.label}
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <CountPill
+                      count={productClassCounts.get(option.value) ?? 0}
+                      variant={
+                        option.value === "spf"
+                          ? "violet"
+                          : option.value === "non-standard"
+                            ? "amber"
+                            : option.value === "usl"
+                              ? "rose"
+                              : "default"
+                      }
+                    />
+                    {isSelected && (
+                      <Check className="h-3.5 w-3.5 text-primary" />
+                    )}
+                  </div>
+                </DropdownMenuItem>
+              );
+            })}
           </DropdownMenuContent>
         </DropdownMenu>
 
@@ -2575,9 +2708,40 @@ function FullAllProductsView() {
       </div>
 
       {/* Active filters display */}
-      {(activeFamilyFilter || activeUsageFilter || (sortOption && sortOption !== "newest")) && (
+      {(activeFamilyFilter ||
+        activeUsageFilter ||
+        activeClassFilter.length > 0 ||
+        (sortOption && sortOption !== "newest")) && (
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs text-muted-foreground">Active:</span>
+          {activeClassFilter.map((cls) => {
+            const option = PRODUCT_CLASS_OPTIONS.find((o) => o.value === cls);
+            if (!option) return null;
+            return (
+              <span
+                key={cls}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-semibold ${option.color}`}
+              >
+                {React.isValidElement(option.icon)
+                  ? React.cloneElement(option.icon as React.ReactElement<any>, {
+                      className: "h-3 w-3",
+                    })
+                  : null}
+                {option.label}
+                <button
+                  type="button"
+                  onClick={() =>
+                    table
+                      .getColumn("productClass")
+                      ?.setFilterValue(activeClassFilter.filter((v) => v !== cls))
+                  }
+                  className="ml-0.5 hover:opacity-60 transition-opacity"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            );
+          })}
           {activeFamilyFilter && (
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-semibold">
               <Layers className="h-3 w-3" />{activeFamilyFilter}
