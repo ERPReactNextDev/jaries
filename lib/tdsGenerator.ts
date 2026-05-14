@@ -68,6 +68,7 @@ export interface GenerateTdsInput {
   terminalLayoutUrl?: string;
   accessoriesImageUrl?: string;
   typeOfPlugUrl?: string;
+  wiringConnectionUrl?: string;
 }
 
 /** Input for a blank template TDS (saved against a productFamily) */
@@ -559,6 +560,7 @@ function buildDrawingSlots(input: GenerateTdsInput): DrawingSlot[] {
     { label: "Terminal Layout", url: input.terminalLayoutUrl ?? "" },
     { label: "Accessories", url: input.accessoriesImageUrl ?? "" },
     { label: "Type of Plug", url: input.typeOfPlugUrl ?? "" },
+    { label: "Wiring Connection", url: input.wiringConnectionUrl ?? "" },
   ].filter((s) => !!s.url.trim());
 }
 

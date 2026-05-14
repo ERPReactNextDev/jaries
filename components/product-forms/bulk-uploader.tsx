@@ -119,6 +119,7 @@ interface ParsedProduct {
   typeOfPlugUrl: string;
   terminalLayoutUrl: string;
   accessoriesImageUrl: string;
+  wiringConnectionUrl: string;
   specs: Record<string, { label: string; value: string }[]>;
 }
 
@@ -224,6 +225,7 @@ const IMG_HEADER_TO_FIELD: Record<string, keyof ParsedProduct> = {
   "TERMINAL LAYOUT": "terminalLayoutUrl",
   ACCESSORIES: "accessoriesImageUrl",
   "TYPE OF PLUG": "typeOfPlugUrl",
+  "WIRING CONNECTION": "wiringConnectionUrl",
 };
 
 // Column headers that map to itemCodes brands
@@ -525,6 +527,7 @@ async function parseWorkbook(file: File): Promise<{
       terminalLayoutUrl: imgVals.terminalLayoutUrl ?? "",
       accessoriesImageUrl: imgVals.accessoriesImageUrl ?? "",
       typeOfPlugUrl: imgVals.typeOfPlugUrl ?? "",
+      wiringConnectionUrl: imgVals.wiringConnectionUrl ?? "",
       specs: specsByGroup,
     });
   }
@@ -989,6 +992,7 @@ async function normalizeShopifyProduct(
     wiringLayoutImage: imageMatches.wiringLayout || "",
     terminalLayoutImage: imageMatches.terminalLayout || "",
     accessoriesImage: imageMatches.accessories || "",
+    wiringConnectionImage: imageMatches.wiringConnection || "",
     website: [] as string[],
     websites: [] as string[],
     productFamily,
