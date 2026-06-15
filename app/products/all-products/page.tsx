@@ -1464,64 +1464,36 @@ function ReadOnlyAllProductsView() {
   const [bulkDownloadTdsOpen, setBulkDownloadTdsOpen] = React.useState(false);
 
   React.useEffect(() => {
-    const mergeAndSort = (a: Product[], b: Product[]): Product[] => {
-      const seen = new Set<string>();
-      const merged: Product[] = [];
-      for (const p of [...a, ...b]) {
-        if (!seen.has(p.id)) {
-          seen.add(p.id);
-          merged.push(p);
-        }
+    let cancelled = false;
+
+    const fetchAll = async () => {
+      setLoading(true);
+      try {
+        // Single query — fetch all products ordered by createdAt desc.
+        // Explicit limit(2000) overrides the client wrapper's DEFAULT_QUERY_LIMIT cap.
+        const snap = await getDocs(
+          query(
+            collection(db, "products"),
+            orderBy("createdAt", "desc"),
+            limit(2000),
+          ),
+        );
+        if (cancelled) return;
+        const products = snap.docs.map(
+          (d) => ({ id: d.id, ...d.data() } as Product),
+        );
+        setData(products);
+      } catch (err) {
+        if (cancelled) return;
+        console.error("Failed to load products:", err);
+        toast.error("Failed to load products");
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-      merged.sort((x, y) => {
-        const tx = x.createdAt?.toMillis?.() ?? x.createdAt ?? 0;
-        const ty = y.createdAt?.toMillis?.() ?? y.createdAt ?? 0;
-        return ty - tx;
-      });
-      return merged;
     };
 
-    let assignedData: Product[] = [];
-    let unassignedData: Product[] = [];
-    let assignedReady = false;
-    let unassignedReady = false;
-
-    const flush = () => {
-      if (assignedReady && unassignedReady) {
-        setData(mergeAndSort(assignedData, unassignedData));
-        setLoading(false);
-      }
-    };
-
-    const qAssigned = query(
-      collection(db, "products"),
-      where("websites", "array-contains-any", [
-        "Disruptive Solutions Inc",
-        "Ecoshift Corporation",
-        "Value Acquisitions Holdings",
-        "Taskflow",
-        "Shopify",
-      ]),
-      orderBy("createdAt", "desc"),
-    );
-    const qUnassigned = query(
-      collection(db, "products"),
-      where("websites", "==", []),
-      orderBy("createdAt", "desc"),
-    );
-
-    const unsubA = onSnapshot(qAssigned, (snap) => {
-      assignedData = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as Product[];
-      assignedReady = true;
-      flush();
-    });
-    const unsubU = onSnapshot(qUnassigned, (snap) => {
-      unassignedData = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as Product[];
-      unassignedReady = true;
-      flush();
-    }, () => { unassignedReady = true; flush(); });
-
-    return () => { unsubA(); unsubU(); };
+    void fetchAll();
+    return () => { cancelled = true; };
   }, []);
 
   const uniqueFamilies = React.useMemo(() => {
@@ -1946,91 +1918,35 @@ function FullAllProductsView() {
   // ── Data Fetching ─────────────────────────────────────────────────────────
 
   React.useEffect(() => {
+    let cancelled = false;
     setLoading(true);
-    const mergeAndSort = (a: Product[], b: Product[]): Product[] => {
-      const seen = new Set<string>();
-      const merged: Product[] = [];
-      for (const p of [...a, ...b]) {
-        if (!seen.has(p.id)) {
-          seen.add(p.id);
-          merged.push(p);
-        }
-      }
-      merged.sort((x, y) => {
-        const tx = x.createdAt?.toMillis?.() ?? x.createdAt ?? 0;
-        const ty = y.createdAt?.toMillis?.() ?? y.createdAt ?? 0;
-        return ty - tx;
-      });
-      return merged;
-    };
 
-    let assignedData: Product[] = [];
-    let unassignedData: Product[] = [];
-    let assignedReady = false;
-    let unassignedReady = false;
-
-    const flush = () => {
-      if (assignedReady && unassignedReady) {
-        setData(mergeAndSort(assignedData, unassignedData));
-        setLoading(false);
-      }
-    };
-
-    const qAssigned = query(
-      collection(db, "products"),
-      where("websites", "array-contains-any", [
-        "Disruptive Solutions Inc",
-        "Ecoshift Corporation",
-        "Value Acquisitions Holdings",
-        "Taskflow",
-        "Shopify",
-      ]),
-      orderBy("createdAt", "desc"),
-    );
-    const qUnassigned = query(
-      collection(db, "products"),
-      where("websites", "==", []),
-      orderBy("createdAt", "desc"),
-    );
-
-    const unsubAssigned = onSnapshot(
-      qAssigned,
-      (snapshot) => {
-        assignedData = snapshot.docs.map((d) => ({
-          id: d.id,
-          ...d.data(),
-        })) as Product[];
-        assignedReady = true;
-        flush();
-      },
-      (error) => {
-        console.error("Fetch error (assigned):", error);
+    const fetchAll = async () => {
+      try {
+        // Explicit limit(2000) overrides the client wrapper's DEFAULT_QUERY_LIMIT cap.
+        const snap = await getDocs(
+          query(
+            collection(db, "products"),
+            orderBy("createdAt", "desc"),
+            limit(2000),
+          ),
+        );
+        if (cancelled) return;
+        const products = snap.docs.map(
+          (d) => ({ id: d.id, ...d.data() } as Product),
+        );
+        setData(products);
+      } catch (err) {
+        if (cancelled) return;
+        console.error("Failed to load products:", err);
         toast.error("Failed to load products");
-        setLoading(false);
-      },
-    );
-
-    const unsubUnassigned = onSnapshot(
-      qUnassigned,
-      (snapshot) => {
-        unassignedData = snapshot.docs.map((d) => ({
-          id: d.id,
-          ...d.data(),
-        })) as Product[];
-        unassignedReady = true;
-        flush();
-      },
-      (error) => {
-        console.warn("Could not fetch unassigned products:", error);
-        unassignedReady = true;
-        flush();
-      },
-    );
-
-    return () => {
-      unsubAssigned();
-      unsubUnassigned();
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     };
+
+    void fetchAll();
+    return () => { cancelled = true; };
   }, []);
 
   // Client-side search across itemDescription, all item codes, and name
