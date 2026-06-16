@@ -49,6 +49,15 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 import { generateTdsPdf } from "@/lib/tdsGenerator";
+import {
+  ItemCodes,
+  ItemCodeBrand,
+  ITEM_CODE_BRAND_CONFIG,
+  getFilledItemCodes,
+  getPrimaryItemCode,
+  migrateToItemCodes,
+  hasAtLeastOneItemCode,
+} from "@/types/product";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -66,6 +75,8 @@ interface ProductItem {
   itemCode?: string;
   productFamily?: string;
   tdsFileUrl?: string;
+  tdsFileUrls?: Partial<Record<ItemCodeBrand, string>>;
+  itemCodes?: ItemCodes;
   technicalSpecs?: any[];
   mainImage?: string;
   dimensionalDrawingImage?: string;
@@ -208,9 +219,11 @@ export function BulkDownloadTdsDialog({ open, onOpenChange }: Props) {
 
   const [selectedFamilyIds, setSelectedFamilyIds] = useState<string[]>([]);
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
+  const [selectedBrands, setSelectedBrands] = useState<ItemCodeBrand[]>(["LIT", "ECOSHIFT"]);
 
   const [familyComboOpen, setFamilyComboOpen] = useState(false);
   const [productComboOpen, setProductComboOpen] = useState(false);
+  const [brandComboOpen, setBrandComboOpen] = useState(false);
 
   const [folderStates, setFolderStates] = useState<FolderState>({});
 
@@ -348,43 +361,49 @@ export function BulkDownloadTdsDialog({ open, onOpenChange }: Props) {
     const productsToDownload: ProductItem[] = [];
     previewGroups.forEach((products) => productsToDownload.push(...products));
 
+    // Calculate total files to download (each product * each brand)
+    const totalFiles = productsToDownload.length * selectedBrands.length;
+
     setIsDownloading(true);
     setDownloadProgress({
-      total: productsToDownload.length,
+      total: totalFiles,
       done: 0,
       failed: 0,
     });
 
     const loadingToast = toast.loading(
-      `Preparing ${productsToDownload.length} TDS files…`,
+      `Preparing ${totalFiles} TDS files…`,
     );
 
     try {
       const JSZip = (await import("jszip")).default;
       const zip = new JSZip();
-      const familyFolders = new Map<string, any>();
+      const familyBrandFolders = new Map<string, any>();
 
-      const getFamilyFolder = (product: ProductItem) => {
+      const getFamilyBrandFolder = (product: ProductItem, brand: ItemCodeBrand) => {
         const familyName = (product.productFamily || "Uncategorised")
           .replace(/[/\\:*?"<>|]/g, "-")
           .trim();
-        if (!familyFolders.has(familyName)) {
-          familyFolders.set(familyName, zip.folder(familyName)!);
+        const key = `${familyName}_${brand}`;
+        if (!familyBrandFolders.has(key)) {
+          const familyFolder = zip.folder(familyName)!;
+          const brandFolder = familyFolder.folder(brand)!;
+          familyBrandFolders.set(key, brandFolder);
         }
-        return familyFolders.get(familyName)!;
+        return familyBrandFolders.get(key)!;
       };
 
       const usedFilenames = new Map<string, number>();
-      const safeFilename = (product: ProductItem): string => {
+      const safeFilename = (product: ProductItem, brand: ItemCodeBrand): string => {
         const raw = resolvePrimaryCode(product);
         const sanitized = raw.replace(/[/\\:*?"<>|]/g, "-").trim();
-        const base = `${sanitized}_TDS`;
+        const base = `${sanitized}_${brand}_TDS`;
         const count = usedFilenames.get(base) ?? 0;
         usedFilenames.set(base, count + 1);
         return count === 0 ? `${base}.pdf` : `${base}_(${count}).pdf`;
       };
 
-      const generateMissing = async (product: ProductItem): Promise<string> => {
+      const generateBrandTds = async (product: ProductItem, brand: ItemCodeBrand): Promise<string> => {
         const technicalSpecs = (product.technicalSpecs ?? [])
           .map((group: any) => ({
             ...group,
@@ -401,11 +420,11 @@ export function BulkDownloadTdsDialog({ open, onOpenChange }: Props) {
 
         const blob = await generateTdsPdf({
           itemDescription: resolveDisplayName(product),
+          itemCodes: product.itemCodes,
           litItemCode: product.litItemCode,
           ecoItemCode: product.ecoItemCode,
           technicalSpecs,
-          brand: !isBlankCode(product.litItemCode) ? "LIT" : "ECOSHIFT",
-          includeBrandAssets: false,
+          brand,
           mainImageUrl: product.mainImage || undefined,
           dimensionalDrawingUrl: product.dimensionalDrawingImage || undefined,
           recommendedMountingHeightUrl:
@@ -427,21 +446,29 @@ export function BulkDownloadTdsDialog({ open, onOpenChange }: Props) {
       let done = 0;
       let failed = 0;
 
-      for (let i = 0; i < productsToDownload.length; i += BATCH) {
-        const chunk = productsToDownload.slice(i, i + BATCH);
+      // Flatten the list to (product, brand) pairs
+      const productBrandPairs: Array<{ product: ProductItem; brand: ItemCodeBrand }> = [];
+      for (const product of productsToDownload) {
+        for (const brand of selectedBrands) {
+          productBrandPairs.push({ product, brand });
+        }
+      }
+
+      for (let i = 0; i < productBrandPairs.length; i += BATCH) {
+        const chunk = productBrandPairs.slice(i, i + BATCH);
         await Promise.allSettled(
-          chunk.map(async (product) => {
+          chunk.map(async ({ product, brand }) => {
             try {
-              let pdfUrl = product.tdsFileUrl;
+              let pdfUrl: string | null = product.tdsFileUrls?.[brand] ?? product.tdsFileUrl ?? null;
               let blobUrl: string | null = null;
               if (!pdfUrl) {
-                blobUrl = await generateMissing(product);
+                blobUrl = await generateBrandTds(product, brand);
                 pdfUrl = blobUrl;
               }
               const res = await fetch(pdfUrl!);
               const blob = await res.blob();
-              const folder = getFamilyFolder(product);
-              folder.file(safeFilename(product), blob);
+              const folder = getFamilyBrandFolder(product, brand);
+              folder.file(safeFilename(product, brand), blob);
               if (blobUrl) URL.revokeObjectURL(blobUrl);
               done++;
             } catch (err) {
@@ -453,7 +480,7 @@ export function BulkDownloadTdsDialog({ open, onOpenChange }: Props) {
           }),
         );
         toast.loading(
-          `Processing ${Math.min(i + BATCH, productsToDownload.length)} / ${productsToDownload.length}…`,
+          `Processing ${Math.min(i + BATCH, productBrandPairs.length)} / ${productBrandPairs.length}…`,
           { id: loadingToast },
         );
       }
@@ -590,6 +617,107 @@ export function BulkDownloadTdsDialog({ open, onOpenChange }: Props) {
                         <button
                           type="button"
                           onClick={() => toggleFamily(id)}
+                          className="hover:text-destructive"
+                        >
+                          <X className="h-2.5 w-2.5" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Brand Selection Combobox */}
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-muted-foreground">
+                  Brands *
+                </label>
+                <Popover
+                  open={brandComboOpen}
+                  onOpenChange={setBrandComboOpen}
+                >
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className="w-full justify-between h-10 text-xs font-medium"
+                    >
+                      <span className="flex items-center gap-2 truncate">
+                        <Package className="h-3.5 w-3.5 opacity-60 shrink-0" />
+                        {selectedBrands.length > 0
+                          ? `${selectedBrands.length} brands selected`
+                          : "Select brands…"}
+                      </span>
+                      <ChevronDown className="h-3.5 w-3.5 opacity-50 shrink-0" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    className="w-[--radix-popover-trigger-width] p-0"
+                    align="start"
+                  >
+                    <Command>
+                      <CommandInput
+                        placeholder="Search brands…"
+                        className="h-9 text-xs"
+                      />
+                      <CommandList
+                        className="max-h-62.5 overflow-y-auto overflow-x-hidden"
+                        onWheel={(e) => e.stopPropagation()}
+                      >
+                        <CommandEmpty>No brands found.</CommandEmpty>
+                        <CommandGroup>
+                          {(["LIT", "ECOSHIFT"] as ItemCodeBrand[]).map((brand) => (
+                            <CommandItem
+                              key={brand}
+                              onSelect={() => {
+                                setSelectedBrands((prev) =>
+                                  prev.includes(brand)
+                                    ? prev.filter((b) => b !== brand)
+                                    : [...prev, brand]
+                                );
+                              }}
+                              className="text-xs font-medium cursor-pointer"
+                            >
+                              <div
+                                className={cn(
+                                  "mr-2 h-3.5 w-3.5 border rounded flex items-center justify-center shrink-0",
+                                  selectedBrands.includes(brand)
+                                    ? "bg-primary border-primary text-primary-foreground"
+                                    : "border-foreground/20",
+                                )}
+                              >
+                                {selectedBrands.includes(brand) && (
+                                  <CheckCircle2 className="h-2.5 w-2.5" />
+                                )}
+                              </div>
+                              {ITEM_CODE_BRAND_CONFIG[brand].label}
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+
+                {selectedBrands.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedBrands.map((brand) => (
+                      <span
+                        key={brand}
+                        className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border"
+                        style={{
+                          backgroundColor: `${ITEM_CODE_BRAND_CONFIG[brand].color}10`,
+                          borderColor: `${ITEM_CODE_BRAND_CONFIG[brand].color}30`,
+                          color: ITEM_CODE_BRAND_CONFIG[brand].color,
+                        }}
+                      >
+                        {ITEM_CODE_BRAND_CONFIG[brand].label}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedBrands((prev) =>
+                              prev.filter((b) => b !== brand)
+                            );
+                          }}
                           className="hover:text-destructive"
                         >
                           <X className="h-2.5 w-2.5" />

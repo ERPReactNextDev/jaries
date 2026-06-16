@@ -195,6 +195,7 @@ export type Product = {
   brands?: string[];
   websites?: string[];
   tdsFileUrl?: string;
+  tdsFileUrls?: Partial<Record<ItemCodeBrand, string>>;
   technicalSpecs?: any[];
   dynamicSpecs?: { title: string; value: string }[];
   dimensionDrawingUrl?: string;
@@ -632,16 +633,110 @@ function TdsPreviewDialog({
   product: Product | null;
 }) {
   const [downloading, setDownloading] = React.useState(false);
+  const [generating, setGenerating] = React.useState(false);
+  const [tempTdsUrl, setTempTdsUrl] = React.useState<string | null>(null);
+  const [tempTdsBlob, setTempTdsBlob] = React.useState<Blob | null>(null);
+
+  React.useEffect(() => {
+    // Reset temp URL when dialog closes or product changes
+    return () => {
+      if (tempTdsUrl) URL.revokeObjectURL(tempTdsUrl);
+      setTempTdsUrl(null);
+      setTempTdsBlob(null);
+    };
+  }, [product, open]);
+
+  // Generate temp TDS when dialog opens if no saved one exists
+  React.useEffect(() => {
+    if (!product) return;
+    const hasSavedTds = product.tdsFileUrl;
+    if (!hasSavedTds) {
+      generateTempTds();
+    } else {
+      if (tempTdsUrl) URL.revokeObjectURL(tempTdsUrl);
+      setTempTdsUrl(null);
+      setTempTdsBlob(null);
+    }
+  }, [product]);
+
   if (!product) return null;
 
-  const tdsUrl = product.tdsFileUrl;
+  const getTdsUrl = () => {
+    if (tempTdsUrl) return tempTdsUrl;
+    return product.tdsFileUrl;
+  };
+
+  const generateTempTds = async () => {
+    setGenerating(true);
+    try {
+      const codes = resolveItemCodes(product);
+      const filled = getFilledItemCodes(codes);
+      const brand = filled.length > 0 ? filled[0].brand : "LIT";
+      const technicalSpecs = (product.technicalSpecs ?? [])
+        .map((group) => ({
+          ...group,
+          specs: (group.specs ?? []).filter((s: any) => {
+            const v = (s.value ?? "").toUpperCase().trim();
+            return v !== "" && v !== "N/A";
+          }),
+        }))
+        .filter((group) => (group.specs ?? []).length > 0);
+
+
+      const p = product as any;
+      const blob = await generateTdsPdf({
+        itemDescription: product.itemDescription || product.name || "",
+        itemCodes: codes,
+        litItemCode: codes.LIT,
+        ecoItemCode: codes.ECOSHIFT,
+        technicalSpecs,
+        brand,
+        mainImageUrl:
+          product.mainImage ||
+          (Array.isArray(product.rawImage)
+            ? product.rawImage[0]
+            : (product.rawImage as unknown as string)) ||
+          undefined,
+        dimensionalDrawingUrl:
+          p.dimensionDrawingImage || p.dimensionalDrawingImage || undefined,
+        recommendedMountingHeightUrl:
+          p.mountingHeightImage ||
+          p.recommendedMountingHeightImage ||
+          undefined,
+        driverCompatibilityUrl: p.driverCompatibilityImage || undefined,
+        baseImageUrl: p.baseImage || undefined,
+        illuminanceLevelUrl: p.illuminanceLevelImage || undefined,
+        wiringDiagramUrl: p.wiringDiagramImage || undefined,
+        installationUrl: p.installationImage || undefined,
+        wiringLayoutUrl: p.wiringLayoutImage || undefined,
+        terminalLayoutUrl: p.terminalLayoutImage || undefined,
+        accessoriesImageUrl: p.accessoriesImage || undefined,
+      });
+      
+      if (tempTdsUrl) URL.revokeObjectURL(tempTdsUrl);
+      const url = URL.createObjectURL(blob);
+      setTempTdsBlob(blob);
+      setTempTdsUrl(url);
+    } catch (err) {
+      console.error("Failed to generate temp TDS:", err);
+      toast.error("Failed to generate preview");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const tdsUrl = getTdsUrl();
   const filename = `${safeProductFilename(product)}_TDS.pdf`;
 
   const handleDownload = async () => {
     if (!tdsUrl) return;
     setDownloading(true);
     try {
-      await downloadPdf(tdsUrl, filename);
+      if (tempTdsBlob) {
+        await downloadPdf(tempTdsUrl!, filename);
+      } else {
+        await downloadPdf(tdsUrl, filename);
+      }
       toast.success(`${filename} downloaded.`);
     } catch (err) {
       toast.error("Download failed — try the View button to open it directly.");
@@ -650,9 +745,41 @@ function TdsPreviewDialog({
     }
   };
 
+  const handleSaveTds = async () => {
+    if (!tempTdsBlob) return;
+    setGenerating(true);
+    try {
+      const codes = resolveItemCodes(product);
+      const filled = getFilledItemCodes(codes);
+      const brand = filled.length > 0 ? filled[0].brand : "LIT";
+      const url = await uploadTdsPdf(tempTdsBlob, filename);
+      if (url.startsWith("http")) {
+        const currentTdsUrls = product.tdsFileUrls || {};
+        await updateProduct(product.id, {
+          tdsFileUrl: url,
+          tdsFileUrls: {
+            ...currentTdsUrls,
+            [brand]: url,
+          },
+          updatedAt: serverTimestamp(),
+        });
+        toast.success("TDS saved successfully!");
+        // Clear temp blob now that we've saved it
+        if (tempTdsUrl) URL.revokeObjectURL(tempTdsUrl);
+        setTempTdsUrl(null);
+        setTempTdsBlob(null);
+      }
+    } catch (err) {
+      console.error("Failed to save TDS:", err);
+      toast.error("Failed to save TDS");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl w-full h-[90vh] flex flex-col p-0 gap-0">
+      <DialogContent className="max-w-6xl w-full h-[95vh] flex flex-col p-0 gap-0">
         <DialogHeader className="px-5 py-4 border-b shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-lg bg-red-50 border border-red-200 flex items-center justify-center shrink-0">
@@ -666,42 +793,65 @@ function TdsPreviewDialog({
                 Technical Data Sheet · Auto-generated
               </DialogDescription>
             </div>
-            {tdsUrl && (
-              <div className="flex items-center gap-2 shrink-0">
-                <a
-                  href={tdsUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="gap-1.5 text-xs h-8"
-                  >
-                    <ExternalLink className="h-3.5 w-3.5" /> View
-                  </Button>
-                </a>
+            <div className="flex items-center gap-2 shrink-0">
+              {tempTdsUrl && (
                 <Button
                   variant="default"
                   size="sm"
                   className="gap-1.5 text-xs h-8"
-                  onClick={handleDownload}
-                  disabled={downloading}
+                  onClick={handleSaveTds}
+                  disabled={generating}
                 >
-                  {downloading ? (
+                  {generating ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   ) : (
-                    <Download className="h-3.5 w-3.5" />
+                    <FilePlus2 className="h-3.5 w-3.5" />
                   )}
-                  {downloading ? "Downloading…" : "Download PDF"}
+                  Save TDS
                 </Button>
-              </div>
-            )}
+              )}
+              {tdsUrl && (
+                <>
+                  <a
+                    href={tdsUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5 text-xs h-8"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" /> View
+                    </Button>
+                  </a>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    className="gap-1.5 text-xs h-8"
+                    onClick={handleDownload}
+                    disabled={downloading}
+                  >
+                    {downloading ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Download className="h-3.5 w-3.5" />
+                    )}
+                    {downloading ? "Downloading…" : "Download PDF"}
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
         </DialogHeader>
         <div className="flex-1 overflow-hidden bg-muted/30">
-          {tdsUrl ? (
+          {generating ? (
+            <div className="h-full flex flex-col items-center justify-center gap-4 text-muted-foreground p-8">
+              <Loader2 className="w-16 h-16 text-muted-foreground/60 animate-spin" />
+              <p className="text-sm font-semibold">Generating TDS Preview...</p>
+            </div>
+          ) : tdsUrl ? (
             <iframe
               src={`${tdsUrl}#toolbar=1&navpanes=0`}
               className="w-full h-full border-0"
@@ -2263,7 +2413,6 @@ function FullAllProductsView() {
           ecoItemCode: resolvedCodes.ECOSHIFT,
           technicalSpecs,
           brand,
-          includeBrandAssets: false,
           mainImageUrl:
             product.mainImage ||
             (Array.isArray(product.rawImage)
@@ -2288,7 +2437,7 @@ function FullAllProductsView() {
 
         const primaryCode =
           getPrimaryItemCode(resolvedCodes)?.code ?? product.id;
-        const filename = `${primaryCode.replace(/[/\\:*?"<>|]/g, "-")}_TDS.pdf`;
+        const filename = `${primaryCode.replace(/[/\\:*?"<>|]/g, "-")}_${brand}_TDS.pdf`;
         const tdsUrl = await uploadTdsPdf(
           tdsBlob,
           filename,
@@ -2297,8 +2446,13 @@ function FullAllProductsView() {
         );
 
         if (tdsUrl.startsWith("http")) {
+          const currentTdsUrls = product.tdsFileUrls || {};
           await updateProduct(product.id, {
             tdsFileUrl: tdsUrl,
+            tdsFileUrls: {
+              ...currentTdsUrls,
+              [brand]: tdsUrl,
+            },
             updatedAt: serverTimestamp(),
           });
         }
@@ -2346,39 +2500,56 @@ function FullAllProductsView() {
 
   const handleBulkDownloadTds = async () => {
     const selectedRows = table.getSelectedRowModel().rows;
-    const withTds = selectedRows.filter((r) => !!r.original.tdsFileUrl);
+    
+    // Collect all (product, brand) pairs that have TDS
+    const productBrandPairs: Array<{ product: Product; brand: ItemCodeBrand; url: string }> = [];
+    for (const row of selectedRows) {
+      const product = row.original;
+      const codes = resolveItemCodes(product);
+      const filledBrands = getFilledItemCodes(codes).map(({ brand }) => brand);
+      
+      // Check for brand-specific TDS first
+      if (product.tdsFileUrls) {
+        for (const brand of Object.keys(product.tdsFileUrls) as ItemCodeBrand[]) {
+          const url = product.tdsFileUrls[brand];
+          if (url) {
+            productBrandPairs.push({ product, brand, url });
+          }
+        }
+      }
+      
+      // Fallback to legacy tdsFileUrl if no brand-specific ones
+      if (product.tdsFileUrl && productBrandPairs.every(p => p.product.id !== product.id)) {
+        const primaryBrand = filledBrands[0] ?? "LIT";
+        productBrandPairs.push({ product, brand: primaryBrand, url: product.tdsFileUrl });
+      }
+    }
 
-    if (withTds.length === 0) {
-      toast.error("None of the selected products have a TDS file.");
+    if (productBrandPairs.length === 0) {
+      toast.error("None of the selected products have TDS files.");
       return;
     }
 
     setIsTdsDownloading(true);
-    const noTdsCount = selectedRows.length - withTds.length;
     const loadingToast = toast.loading(
-      `Preparing ${withTds.length} TDS file${withTds.length !== 1 ? "s" : ""}…`,
+      `Preparing ${productBrandPairs.length} TDS file${productBrandPairs.length !== 1 ? "s" : ""}…`,
     );
 
     try {
       const JSZip = (await import("jszip")).default;
       const zip = new JSZip();
-      const litFolder = zip.folder("LIT")!;
-      const ecoshiftFolder = zip.folder("ECOSHIFT")!;
-      const otherFolder = zip.folder("OTHER")!;
+      const brandFolders = new Map<ItemCodeBrand, any>();
 
-      const detectFolder = (product: Product) => {
-        const codes = resolveItemCodes(product);
-        const filled = getFilledItemCodes(codes);
-        if (filled.length === 0) return litFolder;
-        const primaryBrand = filled[0].brand;
-        if (primaryBrand === "ECOSHIFT") return ecoshiftFolder;
-        if (primaryBrand === "LIT") return litFolder;
-        return otherFolder;
+      const getBrandFolder = (brand: ItemCodeBrand) => {
+        if (!brandFolders.has(brand)) {
+          brandFolders.set(brand, zip.folder(brand)!);
+        }
+        return brandFolders.get(brand)!;
       };
 
       const usedFilenames = new Map<string, number>();
-      const tdsFilename = (product: Product): string => {
-        const base = `${safeProductFilename(product)}_TDS`;
+      const tdsFilename = (product: Product, brand: ItemCodeBrand): string => {
+        const base = `${safeProductFilename(product)}_${brand}_TDS`;
         const count = usedFilenames.get(base) ?? 0;
         usedFilenames.set(base, count + 1);
         return count === 0 ? `${base}.pdf` : `${base}_(${count}).pdf`;
@@ -2407,20 +2578,20 @@ function FullAllProductsView() {
       let succeeded = 0,
         failed = 0;
 
-      for (let i = 0; i < withTds.length; i += BATCH) {
-        const chunk = withTds.slice(i, i + BATCH);
+      for (let i = 0; i < productBrandPairs.length; i += BATCH) {
+        const chunk = productBrandPairs.slice(i, i + BATCH);
         const results = await Promise.allSettled(
-          chunk.map(async ({ original: product }) => {
-            const blob = await fetchWithRetry(product.tdsFileUrl!);
-            const folder = detectFolder(product);
-            folder.file(tdsFilename(product), blob);
+          chunk.map(async ({ product, brand, url }) => {
+            const blob = await fetchWithRetry(url);
+            const folder = getBrandFolder(brand);
+            folder.file(tdsFilename(product, brand), blob);
           }),
         );
         results.forEach((r) => {
           if (r.status === "fulfilled") succeeded++;
           else failed++;
         });
-        if (i + BATCH < withTds.length)
+        if (i + BATCH < productBrandPairs.length)
           await new Promise((r) => setTimeout(r, 300));
       }
 
@@ -2439,8 +2610,7 @@ function FullAllProductsView() {
         [
           `${succeeded} TDS file${succeeded !== 1 ? "s" : ""} downloaded`,
           failed > 0 ? `${failed} failed` : null,
-          noTdsCount > 0 ? `${noTdsCount} skipped (no TDS)` : null,
-          "→ Organised into LIT / ECOSHIFT / OTHER folders",
+          `→ Organised into brand folders: ${Array.from(brandFolders.keys()).join(", ")}`,
         ]
           .filter(Boolean)
           .join(" · "),

@@ -577,11 +577,11 @@ export function normaliseBrand(raw?: string | null): TdsBrand {
  * Generate a filled product TDS PDF.
  *
  * Default output: plain tabular (no brand assets).
- * Set `includeBrandAssets: true` for branded output (PD role).
+ * If brand is provided, includeBrandAssets defaults to true.
  */
 export async function generateTdsPdf(input: GenerateTdsInput): Promise<Blob> {
   const brand = normaliseBrand(input.brand);
-  const includeBrandAssets = input.includeBrandAssets ?? false;
+  const includeBrandAssets = input.includeBrandAssets ?? (input.brand != null);
 
   const rows: unknown[] = [];
 

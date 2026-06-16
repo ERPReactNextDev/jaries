@@ -162,6 +162,7 @@ export interface Product {
   galleryImages?: string[];
   qrCodeImage?: string;
   tdsFileUrl?: string;
+  tdsFileUrls?: Partial<Record<ItemCodeBrand, string>>;
   technicalSpecs?: TechnicalSpec[];
   status?: ProductStatus;
   slug?: string;

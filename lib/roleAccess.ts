@@ -48,27 +48,28 @@ export const roleAccessConfig: RoleAccessConfig = {
   director: ["*"],
 
   pd_manager: [
+    "/profile",
     "/products/all-products",
     "/products/requests",
     "/admin/deleted-products",
     "/admin/audit-logs", // ← added
   ],
-  pd_engineer: ["/products/all-products", "/products/requests"],
-  pd: ["/products/all-products", "/products/requests"],
+  pd_engineer: ["/profile", "/products/all-products", "/products/requests"],
+  pd: ["/profile", "/products/all-products", "/products/requests"],
 
-  project_sales: ["/products/all-products"],
+  project_sales: ["/profile", "/products/all-products"],
 
-  hr: ["/jobs/applications"],
+  hr: ["/profile", "/jobs/applications"],
 
-  seo: ["/content"],
-  marketing: ["/content"],
+  seo: ["/profile", "/content"],
+  marketing: ["/profile", "/content"],
 
-  csr: ["/inquiries"],
+  csr: ["/profile", "/inquiries"],
 
-  warehouse: ["/access-denied"],
-  staff: ["/access-denied"],
-  inventory: ["/access-denied"],
-  ecomm: ["/access-denied"],
+  warehouse: ["/profile", "/access-denied"],
+  staff: ["/profile", "/access-denied"],
+  inventory: ["/profile", "/access-denied"],
+  ecomm: ["/profile", "/access-denied"],
 };
 
 /* ==============================
