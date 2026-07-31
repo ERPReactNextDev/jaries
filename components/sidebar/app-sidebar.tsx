@@ -72,7 +72,7 @@ const allNavItems = {
     ],
   },
   contents: {
-    title: "Contents",
+    title: "Contents (CMS)",
     url: "#",
     icon: <Settings2Icon />,
     items: [
@@ -82,6 +82,7 @@ const allNavItems = {
       { title: "FAQs Manager", url: "/content/faq-manager" },
       { title: "Home Popups", url: "/content/popup" },
       { title: "Projects", url: "/content/projects" },
+      { title: "Buildchem Key Projects", url: "/content/buildchem-key-projects" },
     ],
   },
   "recycle-bin": {
