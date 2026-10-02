@@ -150,6 +150,7 @@ import BulkUploader from "@/components/product-forms/bulk-uploader";
 import { DeleteToRecycleBinDialog } from "@/components/deletedialog";
 import { BulkDownloadTdsDialog } from "@/components/product-forms/bulk-download-tds-dialog";
 import { generateTdsPdf, uploadTdsPdf } from "@/lib/tdsGenerator";
+import { TdsPreview } from "@/components/tds-preview";
 
 import {
   type ItemCodes,
@@ -480,8 +481,8 @@ const TDS_BRAND_OPTIONS: {
     value: "LIT",
     label: "LIT",
     description: "LIT brand header & footer",
-    activeColor: "bg-slate-100 border-slate-500 text-slate-800",
-    dot: "bg-slate-500",
+    activeColor: "bg-yellow-400 border-yellow-500 text-yellow-900",
+    dot: "bg-yellow-600",
   },
   {
     value: "ECOSHIFT",
@@ -691,6 +692,7 @@ function TdsPreviewDialog({
         ecoItemCode: codes.ECOSHIFT,
         technicalSpecs,
         brand,
+        itemCodeBrand: brand, // Use the same brand for item code display
         mainImageUrl:
           product.mainImage ||
           (Array.isArray(product.rawImage)
@@ -712,7 +714,7 @@ function TdsPreviewDialog({
         terminalLayoutUrl: p.terminalLayoutImage || undefined,
         accessoriesImageUrl: p.accessoriesImage || undefined,
       });
-      
+
       if (tempTdsUrl) URL.revokeObjectURL(tempTdsUrl);
       const url = URL.createObjectURL(blob);
       setTempTdsBlob(blob);
@@ -884,19 +886,55 @@ function BulkGenerateTdsDialog({
   jobs,
   onStart,
   isRunning,
+  selectedProducts,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   jobs: TdsJob[];
-  onStart: (brand: "LIT" | "ECOSHIFT") => void;
+  onStart: (headerBrand: "LIT" | "ECOSHIFT", itemCodeBrand: "LIT" | "ECOSHIFT") => void;
   isRunning: boolean;
+  selectedProducts: Product[];
 }) {
-  const [selectedBrand, setSelectedBrand] = React.useState<
+  const [selectedHeaderBrand, setSelectedHeaderBrand] = React.useState<
     "LIT" | "ECOSHIFT" | null
   >(null);
+  const [selectedItemCodeBrand, setSelectedItemCodeBrand] = React.useState<
+    "LIT" | "ECOSHIFT" | null
+  >(null);
+  const [currentStep, setCurrentStep] = React.useState<1 | 2>(1);
+
+  // Check if products have multiple item code brands (only LIT and ECOSHIFT)
+  const hasMultipleItemCodeBrands = React.useMemo(() => {
+    const brands = new Set<"LIT" | "ECOSHIFT">();
+    selectedProducts.forEach((product) => {
+      const codes = resolveItemCodes(product);
+      const filled = getFilledItemCodes(codes);
+      filled.forEach(({ brand }) => {
+        if (brand === "LIT" || brand === "ECOSHIFT") {
+          brands.add(brand);
+        }
+      });
+    });
+    return brands.size > 1;
+  }, [selectedProducts]);
+
+  // Get item codes for display
+  const itemCodesDisplay = React.useMemo(() => {
+    const codes: Record<"LIT" | "ECOSHIFT", string> = { LIT: "", ECOSHIFT: "" };
+    selectedProducts.forEach((product) => {
+      const resolvedCodes = resolveItemCodes(product);
+      if (resolvedCodes.LIT && !codes.LIT) codes.LIT = resolvedCodes.LIT;
+      if (resolvedCodes.ECOSHIFT && !codes.ECOSHIFT) codes.ECOSHIFT = resolvedCodes.ECOSHIFT;
+    });
+    return codes;
+  }, [selectedProducts]);
 
   React.useEffect(() => {
-    if (open) setSelectedBrand(null);
+    if (open) {
+      setSelectedHeaderBrand(null);
+      setSelectedItemCodeBrand(null);
+      setCurrentStep(1);
+    }
   }, [open]);
 
   const total = jobs.length;
@@ -908,6 +946,42 @@ function BulkGenerateTdsDialog({
   const progressPct =
     total > 0 ? Math.round(((done + errors) / total) * 100) : 0;
 
+  const handleNextStep = () => {
+    if (currentStep === 1 && selectedHeaderBrand) {
+      // If only one item code brand exists, skip step 2 and generate directly
+      if (!hasMultipleItemCodeBrands) {
+        const brands = new Set<"LIT" | "ECOSHIFT">();
+        selectedProducts.forEach((product) => {
+          const codes = resolveItemCodes(product);
+          const filled = getFilledItemCodes(codes);
+          filled.forEach(({ brand }) => {
+            if (brand === "LIT" || brand === "ECOSHIFT") {
+              brands.add(brand);
+            }
+          });
+        });
+        if (brands.size === 1) {
+          const singleBrand = Array.from(brands)[0];
+          onStart(selectedHeaderBrand, singleBrand);
+        }
+      } else {
+        setCurrentStep(2);
+      }
+    }
+  };
+
+  const handleBackStep = () => {
+    if (currentStep === 2) {
+      setCurrentStep(1);
+    }
+  };
+
+  const handleGenerate = () => {
+    if (selectedHeaderBrand && selectedItemCodeBrand) {
+      onStart(selectedHeaderBrand, selectedItemCodeBrand);
+    }
+  };
+
   return (
     <Dialog
       open={open}
@@ -916,7 +990,7 @@ function BulkGenerateTdsDialog({
         onOpenChange(v);
       }}
     >
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-7xl w-full">
         <DialogHeader>
           <div className="flex items-center gap-3 mb-1">
             <div className="w-9 h-9 rounded-lg bg-orange-50 border border-orange-200 flex items-center justify-center shrink-0">
@@ -931,45 +1005,136 @@ function BulkGenerateTdsDialog({
                   ? `Finished — ${done} generated, ${errors} failed`
                   : isRunning
                     ? `Generating… ${done + errors} of ${total} complete`
-                    : `${total} product${total !== 1 ? "s" : ""} queued · Plain tabular output`}
+                    : `${total} product${total !== 1 ? "s" : ""} queued`}
               </DialogDescription>
             </div>
           </div>
         </DialogHeader>
 
         {!isRunning && !isComplete && (
-          <div className="space-y-2.5">
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-              Select Brand
-            </p>
-            {TDS_BRAND_OPTIONS.map((opt) => {
-              const isSelected = selectedBrand === opt.value;
-              return (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => setSelectedBrand(opt.value)}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg border-2 text-left transition-all ${isSelected ? `${opt.activeColor} shadow-sm` : "border-border bg-background hover:border-muted-foreground/30 hover:bg-muted/30"}`}
-                >
-                  <span
-                    className={`w-2 h-2 rounded-full shrink-0 ${isSelected ? opt.dot : "bg-muted-foreground/30"}`}
-                  />
-                  <span className="flex flex-col flex-1">
-                    <span className="text-sm font-semibold">{opt.label}</span>
-                    <span
-                      className={`text-[11px] ${isSelected ? "opacity-70" : "text-muted-foreground"}`}
-                    >
-                      {opt.description}
-                    </span>
-                  </span>
-                  <span
-                    className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 transition-all ${isSelected ? "opacity-100" : "opacity-0"}`}
-                  >
-                    <Check className="w-3 h-3" />
-                  </span>
-                </button>
-              );
-            })}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Left Column: Brand Selection */}
+            <div className="space-y-4">
+              {/* Step indicator - only show if multiple item code brands */}
+              {hasMultipleItemCodeBrands && (
+                <div className="flex items-center gap-2">
+                  <div className={`flex items-center justify-center w-6 h-6 rounded-full text-xs font-semibold ${currentStep >= 1 ? "bg-green-500 text-white" : "bg-muted text-muted-foreground"}`}>
+                    1
+                  </div>
+                  <div className={`h-0.5 flex-1 ${currentStep >= 2 ? "bg-green-500" : "bg-muted"}`} />
+                  <div className={`flex items-center justify-center w-6 h-6 rounded-full text-xs font-semibold ${currentStep >= 2 ? "bg-green-500 text-white" : "bg-muted text-muted-foreground"}`}>
+                    2
+                  </div>
+                </div>
+              )}
+
+              {/* Step 1: Select Header Brand */}
+              {currentStep === 1 && (
+                <div className="space-y-2.5">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                    Select Header Brand
+                  </p>
+                  {TDS_BRAND_OPTIONS.map((opt) => {
+                    const isSelected = selectedHeaderBrand === opt.value;
+                    const itemCode = itemCodesDisplay[opt.value];
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => setSelectedHeaderBrand(opt.value)}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg border-2 text-left transition-all ${isSelected ? `${opt.activeColor} shadow-sm` : "border-border bg-background hover:border-muted-foreground/30 hover:bg-muted/30"}`}
+                      >
+                        <span
+                          className={`w-2 h-2 rounded-full shrink-0 ${isSelected ? opt.dot : "bg-muted-foreground/30"}`}
+                        />
+                        <span className="flex flex-col flex-1">
+                          <span className="text-sm font-semibold">{opt.label}</span>
+                          <span
+                            className={`text-[11px] ${isSelected ? "opacity-70" : "text-muted-foreground"}`}
+                          >
+                            {opt.description}
+                          </span>
+                          {hasMultipleItemCodeBrands && itemCode && (
+                            <span className={`text-[10px] font-mono mt-0.5 ${isSelected ? "opacity-80" : "text-muted-foreground"}`}>
+                              {itemCode}
+                            </span>
+                          )}
+                        </span>
+                        <span
+                          className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 transition-all ${isSelected ? "opacity-100" : "opacity-0"}`}
+                        >
+                          <Check className="w-3 h-3" />
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Step 2: Select Item Code Brand - only show if multiple item code brands */}
+              {currentStep === 2 && hasMultipleItemCodeBrands && (
+                <div className="space-y-2.5">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                    Step 2: Select Item Code Brand
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    This determines which item code will appear in the TDS (can be different from header brand)
+                  </p>
+                  {TDS_BRAND_OPTIONS.map((opt) => {
+                    const isSelected = selectedItemCodeBrand === opt.value;
+                    const itemCode = itemCodesDisplay[opt.value];
+                    return (
+                      <button
+                        key={`itemcode-${opt.value}`}
+                        type="button"
+                        onClick={() => setSelectedItemCodeBrand(opt.value)}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg border-2 text-left transition-all ${isSelected ? `${opt.activeColor} shadow-sm` : "border-border bg-background hover:border-muted-foreground/30 hover:bg-muted/30"}`}
+                      >
+                        <span
+                          className={`w-2 h-2 rounded-full shrink-0 ${isSelected ? opt.dot : "bg-muted-foreground/30"}`}
+                        />
+                        <span className="flex flex-col flex-1">
+                          <span className="text-sm font-semibold">{opt.label}</span>
+                          <span
+                            className={`text-[11px] ${isSelected ? "opacity-70" : "text-muted-foreground"}`}
+                          >
+                            {opt.label} item code in TDS
+                          </span>
+                          {hasMultipleItemCodeBrands && itemCode && (
+                            <span className={`text-[10px] font-mono mt-0.5 ${isSelected ? "opacity-80" : "text-muted-foreground"}`}>
+                              {itemCode}
+                            </span>
+                          )}
+                        </span>
+                        <span
+                          className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 transition-all ${isSelected ? "opacity-100" : "opacity-0"}`}
+                        >
+                          <Check className="w-3 h-3" />
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Right Column: TDS Preview */}
+            <div className="space-y-4">
+              {(selectedHeaderBrand || selectedItemCodeBrand) && selectedProducts.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                    TDS Preview
+                  </p>
+                  <div className="border rounded-lg p-4 bg-muted/30 max-h-[500px] overflow-y-auto">
+                    <TdsPreview
+                      product={selectedProducts[0]}
+                      headerBrand={selectedHeaderBrand || "LIT"}
+                      itemCodeBrand={selectedItemCodeBrand || undefined}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -1041,24 +1206,56 @@ function BulkGenerateTdsDialog({
                 variant="outline"
                 onClick={() => onOpenChange(false)}
                 disabled={isRunning}
+                className="border-yellow-400 text-yellow-600 hover:bg-yellow-50"
               >
                 Cancel
               </Button>
-              <Button
-                onClick={() => selectedBrand && onStart(selectedBrand)}
-                disabled={isRunning || total === 0 || !selectedBrand}
-                className="gap-2 bg-orange-500 hover:bg-orange-600 text-white"
-              >
-                {isRunning ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" /> Generating…
-                  </>
-                ) : (
-                  <>
-                    <FilePlus2 className="h-4 w-4" /> Generate {total} TDS
-                  </>
-                )}
-              </Button>
+              {currentStep === 1 && (
+                <Button
+                  onClick={handleNextStep}
+                  disabled={!selectedHeaderBrand}
+                  className="gap-2 bg-green-500 hover:bg-green-600 text-white"
+                >
+                  {hasMultipleItemCodeBrands ? (
+                    <>
+                      Next
+                      <ChevronRight className="h-4 w-4" />
+                    </>
+                  ) : (
+                    <>
+                      <FilePlus2 className="h-4 w-4" /> Generate {total} TDS
+                    </>
+                  )}
+                </Button>
+              )}
+              {currentStep === 2 && hasMultipleItemCodeBrands && (
+                <>
+                  <Button
+                    variant="outline"
+                    onClick={handleBackStep}
+                    disabled={isRunning}
+                    className="border-yellow-400 text-yellow-600 hover:bg-yellow-50"
+                  >
+                    <ChevronRight className="h-4 w-4 rotate-180 mr-2" />
+                    Back
+                  </Button>
+                  <Button
+                    onClick={handleGenerate}
+                    disabled={isRunning || total === 0 || !selectedItemCodeBrand}
+                    className="gap-2 bg-green-500 hover:bg-green-600 text-white"
+                  >
+                    {isRunning ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" /> Generating…
+                      </>
+                    ) : (
+                      <>
+                        <FilePlus2 className="h-4 w-4" /> Generate {total} TDS
+                      </>
+                    )}
+                  </Button>
+                </>
+              )}
             </>
           )}
         </DialogFooter>
@@ -2061,6 +2258,7 @@ function FullAllProductsView() {
     React.useState<Product | null>(null);
   const [bulkTdsOpen, setBulkTdsOpen] = React.useState(false);
   const [tdsJobs, setTdsJobs] = React.useState<TdsJob[]>([]);
+  const [selectedBulkTdsProducts, setSelectedBulkTdsProducts] = React.useState<Product[]>([]);
   const [isTdsRunning, setIsTdsRunning] = React.useState(false);
   const [isTdsDownloading, setIsTdsDownloading] = React.useState(false);
   const [sortOption, setSortOption] = React.useState<SortOption>(null);
@@ -2364,11 +2562,13 @@ function FullAllProductsView() {
         row.original.itemDescription || row.original.name || row.original.id,
       status: "pending",
     }));
+    const selectedProducts = selectedRows.map((row) => row.original);
     setTdsJobs(jobs);
+    setSelectedBulkTdsProducts(selectedProducts);
     setBulkTdsOpen(true);
   };
 
-  const handleStartBulkTds = async (brand: "LIT" | "ECOSHIFT") => {
+  const handleStartBulkTds = async (headerBrand: "LIT" | "ECOSHIFT", itemCodeBrand: "LIT" | "ECOSHIFT") => {
     setIsTdsRunning(true);
     const productMap = new Map<string, Product>(
       table.getSelectedRowModel().rows.map((r) => [r.original.id, r.original]),
@@ -2394,6 +2594,9 @@ function FullAllProductsView() {
         const itemDescription = product.itemDescription || product.name || "";
         const resolvedCodes = resolveItemCodes(product);
 
+        // Use the selected item code brand to determine which code to display
+        const selectedItemCode = resolvedCodes[itemCodeBrand] || "";
+
         const technicalSpecs = (product.technicalSpecs ?? [])
           .map((group) => ({
             ...group,
@@ -2412,7 +2615,8 @@ function FullAllProductsView() {
           litItemCode: resolvedCodes.LIT,
           ecoItemCode: resolvedCodes.ECOSHIFT,
           technicalSpecs,
-          brand,
+          brand: headerBrand, // Use headerBrand for header/footer
+          itemCodeBrand, // Pass itemCodeBrand to TDS generator
           mainImageUrl:
             product.mainImage ||
             (Array.isArray(product.rawImage)
@@ -2435,9 +2639,8 @@ function FullAllProductsView() {
           accessoriesImageUrl: p.accessoriesImage || undefined,
         });
 
-        const primaryCode =
-          getPrimaryItemCode(resolvedCodes)?.code ?? product.id;
-        const filename = `${primaryCode.replace(/[/\\:*?"<>|]/g, "-")}_${brand}_TDS.pdf`;
+        const primaryCode = selectedItemCode || (getPrimaryItemCode(resolvedCodes)?.code ?? product.id);
+        const filename = `${primaryCode.replace(/[/\\:*?"<>|]/g, "-")}_${headerBrand}_TDS.pdf`;
         const tdsUrl = await uploadTdsPdf(
           tdsBlob,
           filename,
@@ -2451,7 +2654,7 @@ function FullAllProductsView() {
             tdsFileUrl: tdsUrl,
             tdsFileUrls: {
               ...currentTdsUrls,
-              [brand]: tdsUrl,
+              [headerBrand]: tdsUrl,
             },
             updatedAt: serverTimestamp(),
           });
@@ -2491,7 +2694,8 @@ function FullAllProductsView() {
         bulk: true,
       },
       metadata: {
-        brand,
+        headerBrand,
+        itemCodeBrand,
         total: tdsJobs.length,
         productIds: tdsJobs.map((j) => j.productId),
       },
@@ -3974,11 +4178,15 @@ function FullAllProductsView() {
           open={bulkTdsOpen}
           onOpenChange={(v) => {
             setBulkTdsOpen(v);
-            if (!v && !isTdsRunning) setTdsJobs([]);
+            if (!v && !isTdsRunning) {
+              setTdsJobs([]);
+              setSelectedBulkTdsProducts([]);
+            }
           }}
           jobs={tdsJobs}
           onStart={handleStartBulkTds}
           isRunning={isTdsRunning}
+          selectedProducts={selectedBulkTdsProducts}
         />
         <DeleteToRecycleBinDialog
           open={!!deleteTarget}

@@ -5,10 +5,10 @@ declare module "*.css" {
 
 declare module "*.scss" {
   const content: string;
-  export default content;
+  export default content; // TODO: Remove this when we have a better solution
 }
 
 declare module "*.sass" {
   const content: string;
-  export default content;
+  export default content; // TODO: Remove this when we have a better solution
 }

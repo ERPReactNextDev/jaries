@@ -48,6 +48,12 @@ export interface GenerateTdsInput {
    */
   brand?: TdsBrand;
   /**
+   * Optional: specify which item code brand to display prominently in the TDS.
+   * If provided, only this brand's item code will be shown (if it exists).
+   * If not provided, all filled item codes will be shown.
+   */
+  itemCodeBrand?: ItemCodeBrand;
+  /**
    * Whether to include brand header/footer images.
    * Default: FALSE (plain tabular output).
    * Set to true only for branded export (PD role).
@@ -514,30 +520,48 @@ function resolveItemCodeForTds(input: {
 
 /**
  * Build item code rows for the TDS table showing all brands.
+ * If itemCodeBrand is specified, only show that brand's item code.
  */
 function buildItemCodeRows(input: {
   itemCodes?: ItemCodes;
   litItemCode?: string;
   ecoItemCode?: string;
+  itemCodeBrand?: ItemCodeBrand;
 }): unknown[] {
   const rows: unknown[] = [];
 
   if (input.itemCodes) {
     const filled = getFilledItemCodes(input.itemCodes);
     if (filled.length > 0) {
-      filled.forEach(({ brand, code }) => {
-        rows.push([`${brand} ITEM CODE :`, caps(code)]);
-      });
+      // If itemCodeBrand is specified, only show that brand's code
+      if (input.itemCodeBrand) {
+        const specificCode = filled.find(({ brand }) => brand === input.itemCodeBrand);
+        if (specificCode) {
+          rows.push([`${specificCode.brand} ITEM CODE :`, caps(specificCode.code)]);
+        }
+      } else {
+        // Otherwise show all filled item codes
+        filled.forEach(({ brand, code }) => {
+          rows.push([`${brand} ITEM CODE :`, caps(code)]);
+        });
+      }
       return rows;
     }
   }
 
-  // Legacy fallback
-  if (!isBlankCode(input.litItemCode)) {
+  // Legacy fallback - respect itemCodeBrand if specified
+  if (input.itemCodeBrand === "LIT" && !isBlankCode(input.litItemCode)) {
     rows.push(["LIT ITEM CODE :", caps(input.litItemCode)]);
-  }
-  if (!isBlankCode(input.ecoItemCode)) {
+  } else if (input.itemCodeBrand === "ECOSHIFT" && !isBlankCode(input.ecoItemCode)) {
     rows.push(["ECOSHIFT ITEM CODE :", caps(input.ecoItemCode)]);
+  } else {
+    // Show both if no specific brand requested
+    if (!isBlankCode(input.litItemCode)) {
+      rows.push(["LIT ITEM CODE :", caps(input.litItemCode)]);
+    }
+    if (!isBlankCode(input.ecoItemCode)) {
+      rows.push(["ECOSHIFT ITEM CODE :", caps(input.ecoItemCode)]);
+    }
   }
   return rows;
 }
@@ -581,12 +605,17 @@ export function normaliseBrand(raw?: string | null): TdsBrand {
  */
 export async function generateTdsPdf(input: GenerateTdsInput): Promise<Blob> {
   const brand = normaliseBrand(input.brand);
-  const includeBrandAssets = input.includeBrandAssets ?? (input.brand != null);
+  const includeBrandAssets = (input.includeBrandAssets ?? (input.brand != null));
 
   const rows: unknown[] = [];
 
   // Item code rows (supports new multi-brand schema)
-  const itemCodeRows = buildItemCodeRows(input);
+  const itemCodeRows = buildItemCodeRows({
+    itemCodes: input.itemCodes,
+    litItemCode: input.litItemCode,
+    ecoItemCode: input.ecoItemCode,
+    itemCodeBrand: input.itemCodeBrand,
+  });
   rows.push(...itemCodeRows);
 
   // Brand row (only when not already shown via itemCodes)
