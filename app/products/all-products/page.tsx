@@ -781,7 +781,7 @@ function TdsPreviewDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[95vw] w-full h-[95vh] flex flex-col p-0 gap-0">
+      <DialogContent className="sm:max-w-[80vw] w-full h-[95vh] flex flex-col p-0 gap-0">
         <DialogHeader className="px-5 py-4 border-b shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-lg bg-red-50 border border-red-200 flex items-center justify-center shrink-0">
@@ -855,7 +855,7 @@ function TdsPreviewDialog({
             </div>
           ) : tdsUrl ? (
             <iframe
-              src={`${tdsUrl}#toolbar=1&navpanes=0&view=FitH`}
+              src={`${tdsUrl}#toolbar=1&navpanes=0`}
               className="w-full h-full border-0"
               title={`${getPrimaryCode(product)} TDS`}
             />
