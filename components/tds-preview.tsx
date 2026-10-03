@@ -8,9 +8,22 @@ interface TdsPreviewProps {
   itemCodeBrand?: "LIT" | "ECOSHIFT";
 }
 
-// Local helper to resolve item codes
+// A4 base canvas (pt). Everything is laid out at this size, then scaled to fit.
+const PAGE_W = 595;
+const PAGE_H = 842;
+
+// Spec table font range (px at base canvas size)
+const MAX_FONT = 9;
+const MIN_FONT = 3.5;
+
+// Reserved height per drawing row (label + image) so drawings never collapse
+const DRAWING_ROW_MIN_H = 85;
+
+const useIsoLayoutEffect =
+  typeof window !== "undefined" ? React.useLayoutEffect : React.useEffect;
+
 function resolveItemCodes(product: any): any {
-  if (product.itemCodes && typeof product.itemCodes === 'object') {
+  if (product.itemCodes && typeof product.itemCodes === "object") {
     return product.itemCodes;
   }
   return {
@@ -27,19 +40,37 @@ function getFilledItemCodes(codes: any): Array<{ brand: string; code: string }> 
 }
 
 export function TdsPreview({ product, headerBrand, itemCodeBrand }: TdsPreviewProps) {
+  const wrapperRef = React.useRef<HTMLDivElement>(null);
+  const contentRef = React.useRef<HTMLDivElement>(null);
+  const tableRef = React.useRef<HTMLTableElement>(null);
+  const [scale, setScale] = React.useState(1);
+  const [assetTick, setAssetTick] = React.useState(0); // refit after header/footer load
+
+  // Scale the fixed A4 canvas to the available width
+  React.useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
+    const update = () => setScale(el.clientWidth / PAGE_W);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const codes = resolveItemCodes(product);
   const filledCodes = getFilledItemCodes(codes);
-  
-  // Get the item code to display
-  const displayItemCode = itemCodeBrand 
-    ? (codes[itemCodeBrand] || "")
-    : (filledCodes[0]?.code || "");
-  
-  const itemDescription = product.itemDescription || product.name || "";
-  const mainImage = product.mainImage || 
-    (Array.isArray(product.rawImage) ? product.rawImage[0] : product.rawImage as string) || "";
 
-  // Get technical specs
+  const displayItemCode = itemCodeBrand
+    ? codes[itemCodeBrand] || ""
+    : filledCodes[0]?.code || "";
+  const displayItemCodeBrand = itemCodeBrand || filledCodes[0]?.brand || "LIT";
+
+  const itemDescription = product.itemDescription || product.name || "";
+  const mainImage =
+    product.mainImage ||
+    (Array.isArray(product.rawImage) ? product.rawImage[0] : (product.rawImage as string)) ||
+    "";
+
   const technicalSpecs = (product.technicalSpecs ?? [])
     .map((group: any) => ({
       ...group,
@@ -50,121 +81,189 @@ export function TdsPreview({ product, headerBrand, itemCodeBrand }: TdsPreviewPr
     }))
     .filter((group: any) => (group.specs ?? []).length > 0);
 
+  // Same drawing slots the PDF generator uses
+  const p = product as any;
+  const drawings = [
+    { label: "Dimensional Drawing", url: p.dimensionDrawingImage || p.dimensionalDrawingImage },
+    { label: "Recommended Mounting Height", url: p.mountingHeightImage || p.recommendedMountingHeightImage },
+    { label: "Driver Compatibility", url: p.driverCompatibilityImage },
+    { label: "Base", url: p.baseImage },
+    { label: "Illuminance Level", url: p.illuminanceLevelImage },
+    { label: "Wiring Diagram", url: p.wiringDiagramImage },
+    { label: "Installation", url: p.installationImage },
+    { label: "Wiring Layout", url: p.wiringLayoutImage },
+    { label: "Terminal Layout", url: p.terminalLayoutImage },
+    { label: "Accessories", url: p.accessoriesImage },
+    { label: "Type of Plug", url: p.typeOfPlugImage },
+    { label: "Wiring Connection", url: p.wiringConnectionImage },
+  ].filter((d) => !!d.url);
+
+  const drawingRows: (typeof drawings)[] = [];
+  for (let i = 0; i < drawings.length; i += 3) drawingRows.push(drawings.slice(i, i + 3));
+
+  // Auto-fit: shrink the spec table font until EVERYTHING fits inside the page
+  useIsoLayoutEffect(() => {
+    const content = contentRef.current;
+    const table = tableRef.current;
+    if (!content || !table) return;
+
+    let size = MAX_FONT;
+    table.style.fontSize = `${size}px`;
+    while (size > MIN_FONT && content.scrollHeight > content.clientHeight + 0.5) {
+      size -= 0.25;
+      table.style.fontSize = `${size}px`;
+    }
+  }, [product, headerBrand, itemCodeBrand, assetTick]);
+
+  const bumpTick = () => setAssetTick((t) => t + 1);
+
+  // Cell padding is in em so it shrinks together with the font
+  const cellStyle: React.CSSProperties = { padding: "0.28em 0.6em" };
+
   return (
-    <div className="w-full bg-white border rounded-lg overflow-hidden">
-      {/* Header */}
-      <div className="relative h-24 bg-gradient-to-r from-yellow-50 to-yellow-100">
-        <img
-          src={`/templates/${headerBrand.toLowerCase()}-header.png`}
-          alt={`${headerBrand} header`}
-          className="w-full h-full object-cover"
-          onError={(e) => {
-            (e.target as HTMLImageElement).style.display = 'none';
-          }}
-        />
-      </div>
-
-      {/* Content */}
-      <div className="p-6 space-y-6">
-        {/* Product Image and Title */}
-        <div className="flex gap-6 items-start">
-          {/* Product Image Box */}
-          <div className="w-36 h-32 border-2 border-gray-300 rounded-lg flex items-center justify-center bg-gray-50 shrink-0">
-            {mainImage ? (
-              <img
-                src={mainImage}
-                alt={itemDescription}
-                className="w-full h-full object-contain p-2"
-              />
-            ) : (
-              <div className="text-gray-400 text-xs">No Image</div>
-            )}
-          </div>
-
-          {/* Product Name */}
-          <div className="flex-1 text-center">
-            <h2 className="text-xl font-bold text-gray-900 uppercase tracking-wide">
-              {itemDescription}
-            </h2>
-            <div className="h-0.5 bg-gray-400 mt-2" />
-          </div>
+    <div
+      ref={wrapperRef}
+      className="w-full relative bg-white border shadow-md overflow-hidden"
+      style={{ height: PAGE_H * scale }}
+    >
+      <div
+        className="absolute top-0 left-0 flex flex-col bg-white overflow-hidden"
+        style={{
+          width: PAGE_W,
+          height: PAGE_H,
+          transform: `scale(${scale})`,
+          transformOrigin: "top left",
+        }}
+      >
+        {/* Header — full image, natural ratio (no cropping) */}
+        <div className="shrink-0">
+          <img
+            key={`h-${headerBrand}`}
+            src={`/templates/${headerBrand.toLowerCase()}-header.png`}
+            alt={`${headerBrand} header`}
+            className="block w-full h-auto"
+            onLoad={bumpTick}
+          />
         </div>
 
-        {/* Specifications Table */}
-        <div className="border rounded-lg overflow-hidden">
-          <table className="w-full text-sm">
-            <tbody>
-              <tr className="border-b">
-                <td className="px-4 py-2 font-semibold bg-gray-100 w-1/2">BRAND :</td>
-                <td className="px-4 py-2 font-bold">{headerBrand}</td>
-              </tr>
-              <tr className="border-b">
-                <td className="px-4 py-2 font-semibold bg-gray-100 w-1/2">
-                  {itemCodeBrand || "LIT"} ITEM CODE :
-                </td>
-                <td className="px-4 py-2 font-mono font-bold">{displayItemCode || "—"}</td>
-              </tr>
-              {technicalSpecs.map((group: any, groupIdx: number) => (
-                <React.Fragment key={groupIdx}>
-                  <tr className="border-b bg-gray-100">
-                    <td colSpan={2} className="px-4 py-2 font-bold text-center">
-                      {group.specGroup}
-                    </td>
-                  </tr>
-                  {group.specs.map((spec: any, specIdx: number) => (
-                    <tr key={specIdx} className="border-b">
-                      <td className="px-4 py-2 font-semibold bg-gray-50">
-                        {spec.name} :
-                      </td>
-                      <td className="px-4 py-2">{spec.value}</td>
-                    </tr>
-                  ))}
-                </React.Fragment>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Drawings Section */}
-        {(product as any).dimensionalDrawingImage || (product as any).illuminanceLevelImage ? (
-          <div className="space-y-3">
-            <h3 className="text-sm font-semibold uppercase tracking-wide">Technical Drawings</h3>
-            <div className="grid grid-cols-2 gap-4">
-              {(product as any).dimensionalDrawingImage && (
-                <div className="border rounded-lg p-2">
-                  <p className="text-xs font-semibold mb-2 text-center">Dimensional Drawing</p>
-                  <img
-                    src={(product as any).dimensionalDrawingImage}
-                    alt="Dimensional Drawing"
-                    className="w-full h-32 object-contain"
-                  />
-                </div>
-              )}
-              {(product as any).illuminanceLevelImage && (
-                <div className="border rounded-lg p-2">
-                  <p className="text-xs font-semibold mb-2 text-center">Illuminance Level</p>
-                  <img
-                    src={(product as any).illuminanceLevelImage}
-                    alt="Illuminance Level"
-                    className="w-full h-32 object-contain"
-                  />
-                </div>
+        {/* Content */}
+        <div
+          ref={contentRef}
+          className="flex-1 min-h-0 flex flex-col gap-3 px-7 pt-3 pb-2 overflow-hidden"
+        >
+          {/* Product image + title */}
+          <div className="shrink-0 flex gap-5 items-center">
+            <div
+              className="border-2 border-black flex items-center justify-center bg-white shrink-0"
+              style={{ width: 110, height: 92 }}
+            >
+              {mainImage ? (
+                <img
+                  src={mainImage}
+                  alt={itemDescription}
+                  className="w-full h-full object-contain p-1.5"
+                />
+              ) : (
+                <div className="text-gray-400 text-[9px]">No Image</div>
               )}
             </div>
+            <div className="flex-1 text-center">
+              <h2 className="text-[17px] leading-tight font-bold text-gray-900 uppercase">
+                {itemDescription}
+              </h2>
+              <div className="h-px bg-gray-500 mt-2" />
+            </div>
           </div>
-        ) : null}
-      </div>
 
-      {/* Footer */}
-      <div className="relative h-16 bg-gradient-to-r from-yellow-50 to-yellow-100">
-        <img
-          src={`/templates/${headerBrand.toLowerCase()}-footer.png`}
-          alt={`${headerBrand} footer`}
-          className="w-full h-full object-cover"
-          onError={(e) => {
-            (e.target as HTMLImageElement).style.display = 'none';
-          }}
-        />
+          {/* Specs table — font auto-shrinks so ALL specs fit */}
+          <div className="shrink-0 border border-gray-300">
+            <table
+              ref={tableRef}
+              className="w-full border-collapse"
+              style={{ fontSize: MAX_FONT, lineHeight: 1.15 }}
+            >
+              <tbody>
+                <tr className="border-b border-gray-300">
+                  <td className="font-bold uppercase" style={{ ...cellStyle, width: "36%" }}>
+                    {displayItemCodeBrand} ITEM CODE :
+                  </td>
+                  <td className="uppercase" style={cellStyle}>
+                    {displayItemCode || "—"}
+                  </td>
+                </tr>
+                <tr className="border-b border-gray-300">
+                  <td className="font-bold uppercase" style={cellStyle}>
+                    BRAND :
+                  </td>
+                  <td className="font-bold uppercase" style={cellStyle}>
+                    {headerBrand}
+                  </td>
+                </tr>
+                {technicalSpecs.map((group: any, gi: number) => (
+                  <React.Fragment key={gi}>
+                    <tr className="border-b border-gray-300 bg-gray-200">
+                      <td colSpan={2} className="font-bold uppercase" style={cellStyle}>
+                        {group.specGroup}
+                      </td>
+                    </tr>
+                    {group.specs.map((spec: any, si: number) => (
+                      <tr key={si} className="border-b border-gray-300">
+                        <td className="font-bold uppercase" style={cellStyle}>
+                          {spec.name} :
+                        </td>
+                        <td className="uppercase" style={cellStyle}>
+                          {spec.value}
+                        </td>
+                      </tr>
+                    ))}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Drawings — label sits right above its image, images shrink to fit */}
+          {drawingRows.length > 0 && (
+            <div
+              className="flex-1 flex flex-col gap-1"
+              style={{ minHeight: drawingRows.length * DRAWING_ROW_MIN_H }}
+            >
+              {drawingRows.map((row, ri) => (
+                <div
+                  key={ri}
+                  className="flex-1 min-h-0 grid gap-2"
+                  style={{ gridTemplateColumns: `repeat(${row.length}, minmax(0, 1fr))` }}
+                >
+                  {row.map((d) => (
+                    <div key={d.label} className="min-h-0 flex flex-col items-stretch">
+                      <p className="shrink-0 text-[7px] font-bold uppercase text-gray-700 text-center leading-none mb-0.5">
+                        {d.label}
+                      </p>
+                      <div className="flex-1 min-h-0">
+                        <img
+                          src={d.url}
+                          alt={d.label}
+                          className="w-full h-full object-contain object-top"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Footer — full image, natural ratio, pinned to bottom */}
+        <div className="shrink-0">
+          <img
+            key={`f-${headerBrand}`}
+            src={`/templates/${headerBrand.toLowerCase()}-footer.png`}
+            alt={`${headerBrand} footer`}
+            className="block w-full h-auto"
+            onLoad={bumpTick}
+          />
+        </div>
       </div>
     </div>
   );

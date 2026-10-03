@@ -481,8 +481,8 @@ const TDS_BRAND_OPTIONS: {
     value: "LIT",
     label: "LIT",
     description: "LIT brand header & footer",
-    activeColor: "bg-yellow-400 border-yellow-500 text-yellow-900",
-    dot: "bg-yellow-600",
+    activeColor: "bg-yellow-50 border-yellow-400 text-yellow-800",
+    dot: "bg-yellow-500",
   },
   {
     value: "ECOSHIFT",
@@ -781,7 +781,7 @@ function TdsPreviewDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl w-full h-[95vh] flex flex-col p-0 gap-0">
+      <DialogContent className="sm:max-w-[95vw] w-full h-[95vh] flex flex-col p-0 gap-0">
         <DialogHeader className="px-5 py-4 border-b shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-lg bg-red-50 border border-red-200 flex items-center justify-center shrink-0">
@@ -855,7 +855,7 @@ function TdsPreviewDialog({
             </div>
           ) : tdsUrl ? (
             <iframe
-              src={`${tdsUrl}#toolbar=1&navpanes=0`}
+              src={`${tdsUrl}#toolbar=1&navpanes=0&view=FitH`}
               className="w-full h-full border-0"
               title={`${getPrimaryCode(product)} TDS`}
             />
@@ -891,7 +891,7 @@ function BulkGenerateTdsDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
   jobs: TdsJob[];
-  onStart: (headerBrand: "LIT" | "ECOSHIFT", itemCodeBrand: "LIT" | "ECOSHIFT") => void;
+  onStart: (headerBrand: "LIT" | "ECOSHIFT", itemCodeBrand: "LIT" | "ECOSHIFT", filteredProducts: Product[]) => void;
   isRunning: boolean;
   selectedProducts: Product[];
 }) {
@@ -902,11 +902,59 @@ function BulkGenerateTdsDialog({
     "LIT" | "ECOSHIFT" | null
   >(null);
   const [currentStep, setCurrentStep] = React.useState<1 | 2>(1);
+  const [itemCodeFilter, setItemCodeFilter] = React.useState<"single" | "multiple" | null>(null);
+
+  // Count single vs multiple item code products
+  const singleCodeCount = React.useMemo(() => {
+    return selectedProducts.filter((product) => {
+      const codes = resolveItemCodes(product);
+      return getFilledItemCodes(codes).length === 1;
+    }).length;
+  }, [selectedProducts]);
+
+  const multipleCodeCount = React.useMemo(() => {
+    return selectedProducts.filter((product) => {
+      const codes = resolveItemCodes(product);
+      return getFilledItemCodes(codes).length > 1;
+    }).length;
+  }, [selectedProducts]);
+
+  // Show filter dropdown only if we have both single and multiple item code products
+  const showFilterDropdown = singleCodeCount > 0 && multipleCodeCount > 0;
+
+  // Filter products based on item code count
+  const filteredProducts = React.useMemo(() => {
+    // If dropdown is not shown (only one type exists), auto-filter to that type
+    if (!showFilterDropdown) {
+      if (singleCodeCount > 0 && multipleCodeCount === 0) {
+        // Only single item code products
+        return selectedProducts.filter((product) => {
+          const codes = resolveItemCodes(product);
+          return getFilledItemCodes(codes).length === 1;
+        });
+      } else if (multipleCodeCount > 0 && singleCodeCount === 0) {
+        // Only multiple item code products
+        return selectedProducts.filter((product) => {
+          const codes = resolveItemCodes(product);
+          return getFilledItemCodes(codes).length > 1;
+        });
+      }
+      return selectedProducts;
+    }
+    // If dropdown is shown (both types exist), use the selected filter
+    if (!itemCodeFilter) return [];
+    return selectedProducts.filter((product) => {
+      const codes = resolveItemCodes(product);
+      const filled = getFilledItemCodes(codes);
+      const codeCount = filled.length;
+      return itemCodeFilter === "single" ? codeCount === 1 : codeCount > 1;
+    });
+  }, [selectedProducts, itemCodeFilter, showFilterDropdown, singleCodeCount, multipleCodeCount]);
 
   // Check if products have multiple item code brands (only LIT and ECOSHIFT)
   const hasMultipleItemCodeBrands = React.useMemo(() => {
     const brands = new Set<"LIT" | "ECOSHIFT">();
-    selectedProducts.forEach((product) => {
+    filteredProducts.forEach((product) => {
       const codes = resolveItemCodes(product);
       const filled = getFilledItemCodes(codes);
       filled.forEach(({ brand }) => {
@@ -916,24 +964,25 @@ function BulkGenerateTdsDialog({
       });
     });
     return brands.size > 1;
-  }, [selectedProducts]);
+  }, [filteredProducts]);
 
   // Get item codes for display
   const itemCodesDisplay = React.useMemo(() => {
     const codes: Record<"LIT" | "ECOSHIFT", string> = { LIT: "", ECOSHIFT: "" };
-    selectedProducts.forEach((product) => {
+    filteredProducts.forEach((product) => {
       const resolvedCodes = resolveItemCodes(product);
       if (resolvedCodes.LIT && !codes.LIT) codes.LIT = resolvedCodes.LIT;
       if (resolvedCodes.ECOSHIFT && !codes.ECOSHIFT) codes.ECOSHIFT = resolvedCodes.ECOSHIFT;
     });
     return codes;
-  }, [selectedProducts]);
+  }, [filteredProducts]);
 
   React.useEffect(() => {
     if (open) {
       setSelectedHeaderBrand(null);
       setSelectedItemCodeBrand(null);
       setCurrentStep(1);
+      setItemCodeFilter(null);
     }
   }, [open]);
 
@@ -951,7 +1000,7 @@ function BulkGenerateTdsDialog({
       // If only one item code brand exists, skip step 2 and generate directly
       if (!hasMultipleItemCodeBrands) {
         const brands = new Set<"LIT" | "ECOSHIFT">();
-        selectedProducts.forEach((product) => {
+        filteredProducts.forEach((product) => {
           const codes = resolveItemCodes(product);
           const filled = getFilledItemCodes(codes);
           filled.forEach(({ brand }) => {
@@ -962,7 +1011,7 @@ function BulkGenerateTdsDialog({
         });
         if (brands.size === 1) {
           const singleBrand = Array.from(brands)[0];
-          onStart(selectedHeaderBrand, singleBrand);
+          onStart(selectedHeaderBrand, singleBrand, filteredProducts);
         }
       } else {
         setCurrentStep(2);
@@ -978,7 +1027,7 @@ function BulkGenerateTdsDialog({
 
   const handleGenerate = () => {
     if (selectedHeaderBrand && selectedItemCodeBrand) {
-      onStart(selectedHeaderBrand, selectedItemCodeBrand);
+      onStart(selectedHeaderBrand, selectedItemCodeBrand, filteredProducts);
     }
   };
 
@@ -990,8 +1039,8 @@ function BulkGenerateTdsDialog({
         onOpenChange(v);
       }}
     >
-      <DialogContent className="sm:max-w-7xl w-full">
-        <DialogHeader>
+      <DialogContent className="sm:max-w-[95vw] w-full h-[95vh] max-h-[95vh] flex flex-col gap-4 overflow-hidden">
+        <DialogHeader className="shrink-0">
           <div className="flex items-center gap-3 mb-1">
             <div className="w-9 h-9 rounded-lg bg-orange-50 border border-orange-200 flex items-center justify-center shrink-0">
               <FilePlus2 className="w-4 h-4 text-orange-600" />
@@ -1005,16 +1054,39 @@ function BulkGenerateTdsDialog({
                   ? `Finished — ${done} generated, ${errors} failed`
                   : isRunning
                     ? `Generating… ${done + errors} of ${total} complete`
-                    : `${total} product${total !== 1 ? "s" : ""} queued`}
+                    : showFilterDropdown && itemCodeFilter
+                      ? `${filteredProducts.length} ${itemCodeFilter === "single" ? "single-item-code" : "multi-item-code"} product${filteredProducts.length !== 1 ? "s" : ""} selected for generation`
+                      : !showFilterDropdown
+                        ? `${filteredProducts.length} product${filteredProducts.length !== 1 ? "s" : ""} selected for generation`
+                        : "Select a filter to continue"}
               </DialogDescription>
             </div>
           </div>
         </DialogHeader>
 
         {!isRunning && !isComplete && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Left Column: Brand Selection */}
-            <div className="space-y-4">
+            <div className="space-y-4 min-h-0 overflow-y-auto">
+              {/* Item Code Filter Dropdown - only show if we have both single and multiple item code products */}
+              {showFilterDropdown && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                    Filter by Item Code Type
+                  </p>
+                  <select
+                    value={itemCodeFilter || ""}
+                    onChange={(e) => setItemCodeFilter((e.target.value || null) as "single" | "multiple" | null)}
+                    className="w-full px-3 py-2 text-sm border rounded-md bg-background"
+                    disabled={isRunning}
+                  >
+                    <option value="">Select filter...</option>
+                    <option value="single">Single Item Code Only ({singleCodeCount})</option>
+                    <option value="multiple">Multiple Item Codes Only ({multipleCodeCount})</option>
+                  </select>
+                </div>
+              )}
+
               {/* Step indicator - only show if multiple item code brands */}
               {hasMultipleItemCodeBrands && (
                 <div className="flex items-center gap-2">
@@ -1119,27 +1191,33 @@ function BulkGenerateTdsDialog({
             </div>
 
             {/* Right Column: TDS Preview */}
-            <div className="space-y-4">
-              {(selectedHeaderBrand || selectedItemCodeBrand) && selectedProducts.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            <div className="flex flex-col min-h-0">
+              {showFilterDropdown && !itemCodeFilter ? (
+                <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                  Select a filter to see preview
+                </div>
+              ) : (selectedHeaderBrand || selectedItemCodeBrand) && filteredProducts.length > 0 ? (
+                <div className="flex flex-col flex-1 min-h-0 gap-2">
+                  <p className="shrink-0 text-xs font-medium text-muted-foreground uppercase tracking-wide">
                     TDS Preview
                   </p>
-                  <div className="border rounded-lg p-4 bg-muted/30 max-h-[500px] overflow-y-auto">
-                    <TdsPreview
-                      product={selectedProducts[0]}
-                      headerBrand={selectedHeaderBrand || "LIT"}
-                      itemCodeBrand={selectedItemCodeBrand || undefined}
-                    />
+                  <div className="flex-1 min-h-0 border rounded-lg p-4 bg-muted/30 overflow-y-auto">
+                    <div className="mx-auto w-full max-w-[900px]">
+                      <TdsPreview
+                        product={filteredProducts[0]}
+                        headerBrand={selectedHeaderBrand || "LIT"}
+                        itemCodeBrand={selectedItemCodeBrand || undefined}
+                      />
+                    </div>
                   </div>
                 </div>
-              )}
+              ) : null}
             </div>
           </div>
         )}
 
         {(isRunning || isComplete) && (
-          <div className="space-y-1.5">
+          <div className="space-y-1.5 shrink-0">
             <Progress value={progressPct} className="h-2" />
             <div className="flex justify-between text-[11px] text-muted-foreground">
               <span>
@@ -1150,44 +1228,71 @@ function BulkGenerateTdsDialog({
           </div>
         )}
 
-        <div className="max-h-64 overflow-y-auto rounded-lg border divide-y text-sm">
-          {jobs.map((job) => (
-            <div
-              key={job.productId}
-              className="flex items-center gap-3 px-3 py-2.5"
-            >
-              <span className="shrink-0">
-                {job.status === "pending" && (
-                  <CircleDashed className="w-4 h-4 text-muted-foreground/40" />
-                )}
-                {job.status === "generating" && (
-                  <Loader2 className="w-4 h-4 text-orange-500 animate-spin" />
-                )}
-                {job.status === "done" && (
-                  <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                )}
-                {job.status === "error" && (
-                  <AlertCircle className="w-4 h-4 text-destructive" />
-                )}
-              </span>
-              <span
-                className={`flex-1 truncate text-xs ${job.status === "error" ? "text-destructive" : job.status === "done" ? "text-muted-foreground" : "text-foreground"}`}
+        <div
+          className={`overflow-y-auto rounded-lg border divide-y text-sm ${
+            isRunning || isComplete ? "flex-1 min-h-0" : "shrink-0 max-h-28"
+          }`}
+        >
+          {isRunning || isComplete ? (
+            jobs.map((job) => (
+              <div
+                key={job.productId}
+                className="flex items-center gap-3 px-3 py-2.5"
               >
-                {job.productName}
-              </span>
-              <span className="text-[10px] text-muted-foreground shrink-0 max-w-35 truncate text-right">
-                {job.status === "pending" && "Queued"}
-                {job.status === "generating" && "Generating…"}
-                {job.status === "done" && "Done"}
-                {job.status === "error" && (job.error ?? "Failed")}
-              </span>
+                <span className="shrink-0">
+                  {job.status === "pending" && (
+                    <CircleDashed className="w-4 h-4 text-muted-foreground/40" />
+                  )}
+                  {job.status === "generating" && (
+                    <Loader2 className="w-4 h-4 text-orange-500 animate-spin" />
+                  )}
+                  {job.status === "done" && (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                  )}
+                  {job.status === "error" && (
+                    <AlertCircle className="w-4 h-4 text-destructive" />
+                  )}
+                </span>
+                <span
+                  className={`flex-1 truncate text-xs ${job.status === "error" ? "text-destructive" : job.status === "done" ? "text-muted-foreground" : "text-foreground"}`}
+                >
+                  {job.productName}
+                </span>
+                <span className="text-[10px] text-muted-foreground shrink-0 max-w-35 truncate text-right">
+                  {job.status === "pending" && "Queued"}
+                  {job.status === "generating" && "Generating…"}
+                  {job.status === "done" && "Done"}
+                  {job.status === "error" && (job.error ?? "Failed")}
+                </span>
+              </div>
+            ))
+          ) : showFilterDropdown && !itemCodeFilter ? (
+            <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
+              Select a filter to see products
             </div>
-          ))}
+          ) : (
+            filteredProducts.map((product) => (
+              <div
+                key={product.id}
+                className="flex items-center gap-3 px-3 py-2.5"
+              >
+                <span className="shrink-0">
+                  <CircleDashed className="w-4 h-4 text-muted-foreground/40" />
+                </span>
+                <span className="flex-1 truncate text-xs text-foreground">
+                  {product.itemDescription || product.name || product.id}
+                </span>
+                <span className="text-[10px] text-muted-foreground shrink-0 max-w-35 truncate text-right">
+                  Queued
+                </span>
+              </div>
+            ))
+          )}
         </div>
 
         {isComplete && (
           <div
-            className={`rounded-lg px-4 py-3 border text-xs space-y-0.5 ${errors === 0 ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-amber-50 border-amber-200 text-amber-700"}`}
+            className={`shrink-0 rounded-lg px-4 py-3 border text-xs space-y-0.5 ${errors === 0 ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-amber-50 border-amber-200 text-amber-700"}`}
           >
             <p className="font-semibold">
               {errors === 0
@@ -1197,7 +1302,7 @@ function BulkGenerateTdsDialog({
           </div>
         )}
 
-        <DialogFooter className="gap-2 sm:gap-2">
+        <DialogFooter className="gap-2 sm:gap-2 shrink-0">
           {isComplete ? (
             <Button onClick={() => onOpenChange(false)}>Close</Button>
           ) : (
@@ -1213,7 +1318,7 @@ function BulkGenerateTdsDialog({
               {currentStep === 1 && (
                 <Button
                   onClick={handleNextStep}
-                  disabled={!selectedHeaderBrand}
+                  disabled={!selectedHeaderBrand || filteredProducts.length === 0}
                   className="gap-2 bg-green-500 hover:bg-green-600 text-white"
                 >
                   {hasMultipleItemCodeBrands ? (
@@ -1223,7 +1328,7 @@ function BulkGenerateTdsDialog({
                     </>
                   ) : (
                     <>
-                      <FilePlus2 className="h-4 w-4" /> Generate {total} TDS
+                      <FilePlus2 className="h-4 w-4" /> Generate {filteredProducts.length} TDS
                     </>
                   )}
                 </Button>
@@ -1241,7 +1346,7 @@ function BulkGenerateTdsDialog({
                   </Button>
                   <Button
                     onClick={handleGenerate}
-                    disabled={isRunning || total === 0 || !selectedItemCodeBrand}
+                    disabled={isRunning || filteredProducts.length === 0 || !selectedItemCodeBrand}
                     className="gap-2 bg-green-500 hover:bg-green-600 text-white"
                   >
                     {isRunning ? (
@@ -1250,7 +1355,7 @@ function BulkGenerateTdsDialog({
                       </>
                     ) : (
                       <>
-                        <FilePlus2 className="h-4 w-4" /> Generate {total} TDS
+                        <FilePlus2 className="h-4 w-4" /> Generate {filteredProducts.length} TDS
                       </>
                     )}
                   </Button>
@@ -2568,14 +2673,22 @@ function FullAllProductsView() {
     setBulkTdsOpen(true);
   };
 
-  const handleStartBulkTds = async (headerBrand: "LIT" | "ECOSHIFT", itemCodeBrand: "LIT" | "ECOSHIFT") => {
+  const handleStartBulkTds = async (headerBrand: "LIT" | "ECOSHIFT", itemCodeBrand: "LIT" | "ECOSHIFT", filteredProducts: Product[]) => {
     setIsTdsRunning(true);
     const productMap = new Map<string, Product>(
-      table.getSelectedRowModel().rows.map((r) => [r.original.id, r.original]),
+      filteredProducts.map((p) => [p.id, p]),
     );
 
-    for (let i = 0; i < tdsJobs.length; i++) {
-      const job = tdsJobs[i];
+    // Create jobs for filtered products only
+    const filteredJobs: TdsJob[] = filteredProducts.map((product) => ({
+      productId: product.id,
+      productName: product.itemDescription || product.name || product.id,
+      status: "pending",
+    }));
+    setTdsJobs(filteredJobs);
+
+    for (let i = 0; i < filteredJobs.length; i++) {
+      const job = filteredJobs[i];
       const baseProduct = productMap.get(job.productId);
 
       setTdsJobs((prev) =>
