@@ -34,7 +34,7 @@ export const PUBLIC_ROUTES = ["/auth", "/access-denied"];
    SUPERADMIN-ONLY ROUTES
    ============================== */
 
-export const SUPERADMIN_ONLY_ROUTES = ["/admin/register"];
+export const SUPERADMIN_ONLY_ROUTES = ["/admin/register", "/admin/api-management"];
 
 export const VERIFY_ONLY_ROUTES = ["/admin/requests"];
 

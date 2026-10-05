@@ -91,6 +91,7 @@ const allNavItems = {
     icon: <LockIcon />,
     items: [
       { title: "Register User", url: "/admin/register" },
+      { title: "API Management", url: "/admin/api-management" },
       { title: "Audit Logs", url: "/admin/audit-logs" },
       { title: "Deleted Products", url: "/admin/deleted-products" },
       { title: "Requests", url: "/admin/requests" },
@@ -229,10 +230,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         // Drop the entire section if no items remain
         if (filteredItems.length === 0) return null;
 
-        // For the Admin section, hide "Register User" from non-superadmins
+        // For the Admin section, hide "Register User" and "API Management" from non-superadmins
         if (section.title === "Admin") {
           const adminFiltered = filteredItems.filter((item: any) => {
-            if (item.title === "Register User")
+            if (item.title === "Register User" || item.title === "API Management")
               return userRole === "superadmin";
             return true;
           });
