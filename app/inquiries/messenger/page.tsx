@@ -10,6 +10,7 @@ import {
   addDoc,
   serverTimestamp,
   where,
+  limit,
   doc,
   deleteDoc,
   updateDoc,
@@ -70,6 +71,13 @@ import {
 } from "@/components/ui/breadcrumb";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
+// ── CONSTANTS ────────────────────────────────────────────────────────────────
+
+// The query wrapper in lib/firestore/client.ts defaults to 50 docs.
+// Pass an explicit limit so ALL sender names / conversations show up.
+const CHAT_QUERY_LIMIT = 1000;
+const DEFAULT_GUEST_NAME = "Guest Client";
+
 // ── TYPES ────────────────────────────────────────────────────────────────────
 
 type Message = {
@@ -80,16 +88,29 @@ type Message = {
   imageUrl?: string;
   timestamp: string;
   isAdmin: boolean;
+  seenBy?: string[];
+  reactions?: Record<string, string[]>;
+  replyTo?: {
+    text: string;
+    senderName: string;
+    originalMsgId?: string;
+  } | null;
+  edited?: boolean;
+  editedAt?: any;
 };
 
 type Conversation = {
+  /** Unique key: `${email}::${guestName}` — one conversation per sender name */
   id: string;
-  name: string;
+  name: string; // always the GUEST's senderName, never the admin's
   email: string;
   initials: string;
   messages: Message[];
   hasUnread: boolean;
+  lastMs: number;
 };
+
+const makeConvId = (email: string, name: string) => `${email}::${name}`;
 
 // ── COMPONENT ─────────────────────────────────────────────────────────────────
 
@@ -101,18 +122,31 @@ export default function Messenger() {
   const [adminSession, setAdminSession] = useState<any>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [showChat, setShowChat] = useState(false);
+  const [typingUsers, setTypingUsers] = useState<string[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string>("");
 
   // Edit state
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
   const [hoveredMsgId, setHoveredMsgId] = useState<string | null>(null);
+  const [activeReactionMsgId, setActiveReactionMsgId] = useState<string | null>(null);
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  const [editingConvName, setEditingConvName] = useState<string | null>(null);
+  const [tempConvName, setTempConvName] = useState("");
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const EMOJI_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
 
   useEffect(() => {
     const session = localStorage.getItem("disruptive_admin_user");
-    if (session) setAdminSession(JSON.parse(session));
+    if (session) {
+      const userData = JSON.parse(session);
+      setAdminSession(userData);
+      setCurrentUserId(userData.uid || userData.email || "admin");
+    }
   }, []);
 
   // ── Real-time listener ────────────────────────────────────────────────────
@@ -120,54 +154,105 @@ export default function Messenger() {
     const q = query(
       collection(db, "chats"),
       where("website", "==", "disruptivesolutionsinc"),
-      orderBy("timestamp", "asc"),
+      orderBy("timestamp", "desc"),
+      limit(CHAT_QUERY_LIMIT),
     );
 
-    const unsub = onSnapshot(q, (snapshot) => {
-      const grouped: Record<string, Conversation> = {};
+    const unsub = onSnapshot(
+      q,
+      (snapshot: any) => {
+        // 1) Normalize + sort oldest -> newest.
+        //    Pending serverTimestamp() writes have a null timestamp, so use "now".
+        const rows = snapshot.docs
+          .map((d: any) => {
+            const data = d.data();
+            const ms: number = data.timestamp?.toMillis?.() ?? Date.now();
+            return { id: d.id as string, data, ms };
+          })
+          .sort((a: any, b: any) => a.ms - b.ms);
 
-      snapshot.docs.forEach((d) => {
-        const data = d.data();
-        const email = data.senderEmail;
+        const grouped: Record<string, Conversation> = {};
+        // Latest guest name per email (used for legacy admin messages that
+        // don't have `conversationName` yet).
+        const lastGuestNameByEmail: Record<string, string> = {};
 
-        if (!grouped[email]) {
-          grouped[email] = {
-            id: email,
-            email,
-            name: data.senderName || "Guest Client",
-            initials: (data.senderName || "G").substring(0, 2).toUpperCase(),
-            messages: [],
-            hasUnread: false,
+        rows.forEach(({ id, data, ms }: any) => {
+          const email: string = data.senderEmail || "unknown";
+          const isAdmin = data.isAdmin === true;
+
+          // 2) Decide which conversation this message belongs to.
+          //    - Guest message  -> its own senderName
+          //    - Admin message  -> conversationName (set when replying),
+          //                        falling back to last guest name of that email
+          let convName: string;
+          if (isAdmin) {
+            convName =
+              (data.conversationName || "").trim() ||
+              lastGuestNameByEmail[email] ||
+              DEFAULT_GUEST_NAME;
+          } else {
+            convName = (data.senderName || "").trim() || DEFAULT_GUEST_NAME;
+            lastGuestNameByEmail[email] = convName;
+          }
+
+          const key = makeConvId(email, convName);
+
+          if (!grouped[key]) {
+            grouped[key] = {
+              id: key,
+              email,
+              name: convName, // persistent — never overwritten by admin name
+              initials: convName.substring(0, 2).toUpperCase(),
+              messages: [],
+              hasUnread: false,
+              lastMs: 0,
+            };
+          }
+
+          const message: Message = {
+            id,
+            sender: isAdmin ? "user" : "contact",
+            author: data.senderName || (isAdmin ? "Admin" : convName),
+            text: data.message,
+            imageUrl: data.imageUrl,
+            timestamp: new Date(ms).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            }),
+            isAdmin,
+            seenBy: data.seenBy || [],
+            reactions: data.reactions || {},
+            replyTo: data.replyTo || null,
+            edited: data.edited || false,
+            editedAt: data.editedAt,
           };
-        }
 
-        const isAdmin = data.isAdmin || false;
-        grouped[email].messages.push({
-          id: d.id,
-          sender: isAdmin ? "user" : "contact",
-          author: data.senderName,
-          text: data.message,
-          imageUrl: data.imageUrl,
-          timestamp:
-            data.timestamp
-              ?.toDate()
-              .toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) ||
-            "...",
-          isAdmin,
+          grouped[key].messages.push(message);
+          grouped[key].lastMs = ms;
         });
 
-        const last =
-          grouped[email].messages[grouped[email].messages.length - 1];
-        grouped[email].hasUnread = !last.isAdmin;
-      });
+        // 3) Unread flag + sort conversations (most recent first)
+        const list = Object.values(grouped)
+          .map((conv) => {
+            const last = conv.messages[conv.messages.length - 1];
+            return { ...conv, hasUnread: !!last && !last.isAdmin };
+          })
+          .sort((a, b) => b.lastMs - a.lastMs);
 
-      const list = Object.values(grouped);
-      setConversations(list);
-      if (!selectedId && list.length > 0) setSelectedId(list[0].id);
-    });
+        setConversations(list);
+
+        // Keep current selection if it still exists, else pick the first one
+        setSelectedId((prev) =>
+          prev && list.some((c) => c.id === prev) ? prev : list[0]?.id ?? "",
+        );
+      },
+      (error: any) => {
+        console.error("Error in real-time listener:", error);
+      },
+    );
 
     return () => unsub();
-  }, [selectedId]);
+  }, []);
 
   const activeConversation = useMemo(
     () => conversations.find((c) => c.id === selectedId),
@@ -179,34 +264,136 @@ export default function Messenger() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [activeConversation?.messages]);
 
-  // ── Handlers ─────────────────────────────────────────────────────────────
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!draft.trim() || !selectedId || !adminSession) return;
-    try {
-      await addDoc(collection(db, "chats"), {
-        senderEmail: selectedId,
-        senderName: adminSession.displayName || "Admin",
-        message: draft.trim(),
-        isAdmin: true,
-        timestamp: serverTimestamp(),
-        website: "disruptivesolutionsinc",
+  // ── Mark messages as read ────────────────────────────────────────────────
+  useEffect(() => {
+    if (!selectedId || !activeConversation || activeConversation.messages.length === 0) {
+      return;
+    }
+
+    const unreadMsgs = activeConversation.messages.filter(
+      (msg) => !msg.isAdmin && !msg.seenBy?.includes(currentUserId),
+    );
+
+    if (unreadMsgs.length > 0) {
+      unreadMsgs.forEach(async (msg) => {
+        const seenByUsers = [...(msg.seenBy || []), currentUserId];
+        await updateDoc(doc(db, "chats", msg.id), {
+          seenBy: seenByUsers,
+        });
       });
-      setDraft("");
+    }
+  }, [selectedId, activeConversation?.messages, currentUserId]);
+
+  // ── Typing indicator timeout ────────────────────────────────────────────
+  useEffect(() => {
+    if (draft.length > 0) {
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+      typingTimeoutRef.current = setTimeout(() => {
+        setTypingUsers([]);
+      }, 3000);
+    }
+  }, [draft]);
+
+  // ── Handlers ─────────────────────────────────────────────────────────────
+  const handleToggleReaction = async (msgId: string, emoji: string) => {
+    try {
+      const msg = activeConversation?.messages.find((m) => m.id === msgId);
+      if (!msg) return;
+
+      const reactions = { ...(msg.reactions || {}) };
+      const users = reactions[emoji] || [];
+
+      reactions[emoji] = users.includes(currentUserId)
+        ? users.filter((id) => id !== currentUserId)
+        : [...users, currentUserId];
+
+      if (reactions[emoji].length === 0) {
+        delete reactions[emoji];
+      }
+
+      await updateDoc(doc(db, "chats", msgId), {
+        reactions,
+      });
     } catch (err) {
       console.error(err);
     }
   };
 
+  const handleUpdateConversationName = async (newName: string) => {
+    const trimmed = newName.trim();
+    if (!trimmed || !activeConversation) return;
+
+    try {
+      const conversation = activeConversation;
+
+      // Guest messages: update senderName + conversationName
+      // Admin messages: keep admin's senderName, only update conversationName
+      const updates = conversation.messages.map((msg) =>
+        updateDoc(
+          doc(db, "chats", msg.id),
+          msg.isAdmin
+            ? { conversationName: trimmed }
+            : { senderName: trimmed, conversationName: trimmed },
+        ),
+      );
+
+      // Follow the conversation to its new key
+      setSelectedId(makeConvId(conversation.email, trimmed));
+      await Promise.all(updates);
+      setEditingConvName(null);
+      setTempConvName("");
+    } catch (err) {
+      console.error("Error updating conversation name:", err);
+    }
+  };
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!draft.trim() || !activeConversation || !adminSession) return;
+    const messageText = draft.trim();
+    const target = activeConversation;
+    setDraft("");
+    setReplyingTo(null);
+
+    try {
+      await addDoc(collection(db, "chats"), {
+        senderEmail: target.email,
+        // Admin's own name (who replied)
+        senderName: adminSession.displayName || "Admin",
+        // Guest's name -> keeps the message inside the right conversation
+        conversationName: target.name,
+        message: messageText,
+        isAdmin: true,
+        timestamp: serverTimestamp(),
+        website: "disruptivesolutionsinc",
+        seenBy: [currentUserId],
+        reactions: {},
+        replyTo: replyingTo
+          ? {
+              text: replyingTo.text || "",
+              senderName: replyingTo.author,
+              originalMsgId: replyingTo.id,
+            }
+          : null,
+      });
+    } catch (err) {
+      console.error(err);
+      setDraft(messageText);
+    }
+  };
+
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !selectedId || !adminSession) return;
+    if (!file || !activeConversation || !adminSession) return;
     try {
       setIsUploading(true);
       const url = await uploadToCloudinary(file);
       await addDoc(collection(db, "chats"), {
-        senderEmail: selectedId,
+        senderEmail: activeConversation.email,
         senderName: adminSession.displayName || "Admin",
+        conversationName: activeConversation.name,
         imageUrl: url,
         isAdmin: true,
         timestamp: serverTimestamp(),
@@ -277,10 +464,8 @@ export default function Messenger() {
           </header>
 
           {/* ── PAGE CONTENT WRAPPER ── */}
-          {/* Padded container so the messenger panel doesn't bleed edge-to-edge */}
           <div className="flex flex-1 overflow-hidden p-4 lg:p-6 bg-muted/30">
             {/* ── MESSENGER CONTAINER ── */}
-            {/* Fixed height panel with rounded border — not full-screen */}
             <div className="flex flex-1 overflow-hidden border rounded-none shadow-sm bg-background max-h-[calc(100vh-8rem)]">
               {/* ── CONVERSATION SIDEBAR ── */}
               <div
@@ -347,6 +532,7 @@ export default function Messenger() {
                               {conv.name}
                             </p>
                             <p className="text-[11px] text-muted-foreground truncate">
+                              {lastMsg?.isAdmin ? "You: " : ""}
                               {lastMsg?.imageUrl
                                 ? "📷 Sent an image"
                                 : lastMsg?.text}
@@ -380,7 +566,7 @@ export default function Messenger() {
                     >
                       {/* Chat header — fixed, does not scroll */}
                       <div className="h-16 px-4 border-b flex items-center justify-between shrink-0">
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-3 flex-1">
                           <Button
                             variant="ghost"
                             size="icon"
@@ -394,14 +580,46 @@ export default function Messenger() {
                               {activeConversation.initials}
                             </AvatarFallback>
                           </Avatar>
-                          <div>
-                            <p className="text-sm font-semibold leading-tight">
-                              {activeConversation.name}
-                            </p>
-                            <p className="text-[11px] text-muted-foreground">
-                              {activeConversation.email}
-                            </p>
-                          </div>
+                          {editingConvName === activeConversation.id ? (
+                            <div className="flex items-center gap-2 flex-1">
+                              <Input
+                                value={tempConvName}
+                                onChange={(e) => setTempConvName(e.target.value)}
+                                className="rounded-none h-8 text-sm flex-1"
+                                autoFocus
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter")
+                                    handleUpdateConversationName(tempConvName);
+                                  if (e.key === "Escape") {
+                                    setEditingConvName(null);
+                                    setTempConvName("");
+                                  }
+                                }}
+                              />
+                              <Button
+                                size="icon"
+                                className="h-7 w-7 rounded-none"
+                                onClick={() => handleUpdateConversationName(tempConvName)}
+                              >
+                                <Check className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          ) : (
+                            <div className="flex-1">
+                              <p
+                                className="text-sm font-semibold leading-tight cursor-pointer hover:text-primary transition-colors"
+                                onClick={() => {
+                                  setEditingConvName(activeConversation.id);
+                                  setTempConvName(activeConversation.name);
+                                }}
+                              >
+                                {activeConversation.name}
+                              </p>
+                              <p className="text-[11px] text-muted-foreground">
+                                {activeConversation.email}
+                              </p>
+                            </div>
+                          )}
                         </div>
 
                         <DropdownMenu>
@@ -418,8 +636,15 @@ export default function Messenger() {
                             align="end"
                             className="rounded-none"
                           >
-                            <DropdownMenuItem className="text-xs">
-                              View Profile
+                            <DropdownMenuItem
+                              className="text-xs"
+                              onClick={() => {
+                                setEditingConvName(activeConversation.id);
+                                setTempConvName(activeConversation.name);
+                              }}
+                            >
+                              <Edit2 className="h-3 w-3 mr-2" />
+                              Edit Name
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -443,11 +668,13 @@ export default function Messenger() {
                           >
                             <div
                               className={cn(
-                                "flex flex-col max-w-[70%] group",
+                                "flex flex-col max-w-[70%] group relative",
                                 msg.sender === "user"
                                   ? "items-end"
                                   : "items-start",
                               )}
+                              onMouseEnter={() => setActiveReactionMsgId(msg.id)}
+                              onMouseLeave={() => setActiveReactionMsgId(null)}
                             >
                               {editingId === msg.id ? (
                                 /* Edit mode */
@@ -514,6 +741,57 @@ export default function Messenger() {
                                         </p>
                                       )}
                                     </div>
+
+                                    {/* Reactions */}
+                                    {msg.reactions && Object.keys(msg.reactions).length > 0 && (
+                                      <div className="flex flex-wrap gap-1 mt-2">
+                                        {Object.entries(msg.reactions).map(([emoji, users]) => (
+                                          <button
+                                            key={emoji}
+                                            onClick={() => handleToggleReaction(msg.id, emoji)}
+                                            className={cn(
+                                              "flex items-center gap-1 px-2 py-0.5 rounded text-xs",
+                                              users.includes(currentUserId)
+                                                ? "bg-primary/20 border border-primary"
+                                                : "bg-muted border border-muted-foreground/20 hover:bg-muted/80",
+                                            )}
+                                            title={users.join(", ")}
+                                          >
+                                            <span>{emoji}</span>
+                                            <span className="text-[10px]">{users.length}</span>
+                                          </button>
+                                        ))}
+                                      </div>
+                                    )}
+
+                                    {/* Reaction add button */}
+                                    {activeReactionMsgId === msg.id && (
+                                      <div className="flex gap-1 mt-2">
+                                        {EMOJI_REACTIONS.map((emoji) => (
+                                          <button
+                                            key={emoji}
+                                            onClick={() => handleToggleReaction(msg.id, emoji)}
+                                            className="text-lg hover:scale-125 transition-transform"
+                                          >
+                                            {emoji}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    )}
+
+                                    {/* Edited badge */}
+                                    {msg.edited && (
+                                      <div className="text-[9px] text-muted-foreground italic mt-1">
+                                        (edited)
+                                      </div>
+                                    )}
+
+                                    {/* Read receipts */}
+                                    {msg.seenBy && msg.seenBy.length > 0 && !msg.isAdmin && (
+                                      <div className="text-[9px] text-muted-foreground mt-1">
+                                        👁️ {msg.seenBy.length}
+                                      </div>
+                                    )}
 
                                     {/* Admin message actions */}
                                     {msg.isAdmin && (
@@ -598,6 +876,36 @@ export default function Messenger() {
 
                       {/* Input area — fixed at bottom, does not scroll */}
                       <div className="p-4 border-t bg-background shrink-0">
+                        {/* Reply context banner */}
+                        {replyingTo && (
+                          <div className="mb-3 p-2 bg-muted border-l-2 border-primary flex items-center justify-between rounded text-xs">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[10px] text-muted-foreground font-semibold">
+                                Replying to {replyingTo.author}
+                              </p>
+                              <p className="text-[11px] truncate text-foreground">
+                                {replyingTo.text || "📷 Image"}
+                              </p>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="rounded-none h-6 w-6 ml-2"
+                              onClick={() => setReplyingTo(null)}
+                            >
+                              <XIcon className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        )}
+
+                        {/* Typing indicator */}
+                        {typingUsers.length > 0 && (
+                          <div className="mb-2 text-[10px] text-muted-foreground italic">
+                            {typingUsers.join(", ")} {typingUsers.length === 1 ? "is" : "are"} typing...
+                          </div>
+                        )}
+
                         <form onSubmit={handleSubmit}>
                           <input
                             type="file"

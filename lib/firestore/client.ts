@@ -22,6 +22,7 @@ const REALTIME_COLLECTION_ALLOWLIST = new Set<string>([
   "inventory",
   "cms_live_dashboards",
   "collaboration_sessions",
+  "chats",
 ]);
 
 function hasConstraintType(
