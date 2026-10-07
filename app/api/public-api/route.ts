@@ -13,6 +13,7 @@ import {
   limit,
 } from "@/lib/firestore/client";
 import crypto from "crypto";
+import { migrateToItemCodes, hasAtLeastOneItemCode } from "@/lib/produc";
 
 export const dynamic = "force-dynamic";
 
@@ -83,22 +84,34 @@ export async function GET(req: NextRequest) {
           );
         }
 
-        const status = searchParams.get("status") ?? "public";
+        const status = searchParams.get("status");
 
-        const productsQuery = query(
-          collection(db, "products"),
-          where("status", "==", status)
-        );
+        let productsQuery;
+        if (status) {
+          productsQuery = query(
+            collection(db, "products"),
+            where("status", "==", status)
+          );
+        } else {
+          productsQuery = query(collection(db, "products"));
+        }
 
         const snapshot = await getDocs(productsQuery);
         const products = snapshot.docs.map((d) => {
           const data = d.data();
+          // Migrate legacy itemCode fields to new itemCodes format
+          const itemCodes = migrateToItemCodes({
+            itemCodes: data.itemCodes,
+            litItemCode: data.litItemCode,
+            ecoItemCode: data.ecoItemCode,
+            itemCode: data.itemCode,
+          });
           return {
             id: d.id,
             name: data.name,
             slug: data.slug,
             itemCode: data.itemCode,
-            itemCodes: data.itemCodes,
+            itemCodes: hasAtLeastOneItemCode(itemCodes) ? itemCodes : undefined,
             itemDescription: data.itemDescription,
             shortDescription: data.shortDescription,
             productClass: data.productClass,
@@ -145,12 +158,109 @@ export async function GET(req: NextRequest) {
         }
 
         const data = productDoc.data();
+        // Migrate legacy itemCode fields to new itemCodes format
+        const itemCodes = migrateToItemCodes({
+          itemCodes: data.itemCodes,
+          litItemCode: data.litItemCode,
+          ecoItemCode: data.ecoItemCode,
+          itemCode: data.itemCode,
+        });
         return NextResponse.json({
           id: productDoc.id,
           name: data.name,
           slug: data.slug,
           itemCode: data.itemCode,
+          itemCodes: hasAtLeastOneItemCode(itemCodes) ? itemCodes : undefined,
+          itemDescription: data.itemDescription,
+          shortDescription: data.shortDescription,
+          productClass: data.productClass,
+          productFamily: data.productFamily,
+          productUsage: data.productUsage,
+          brand: data.brand,
+          mainImage: data.mainImage,
+          baseImage: data.baseImage,
+          galleryImages: data.galleryImages,
+          technicalSpecs: data.technicalSpecs,
+          regularPrice: data.regularPrice,
+          salePrice: data.salePrice,
+          promoPrice: data.promoPrice,
+          status: data.status,
+          seo: data.seo,
+          websites: data.websites,
+          createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
+          updatedAt: data.updatedAt?.toDate?.()?.toISOString() || null,
+        });
+      }
+
+      case "product-by-itemcode": {
+        if (!hasPermission(permissions!, "products:read")) {
+          return NextResponse.json(
+            { error: "Permission denied: products:read required" },
+            { status: 403 }
+          );
+        }
+
+        const itemCode = searchParams.get("itemCode");
+        if (!itemCode) {
+          return NextResponse.json({ error: "Item code is required" }, { status: 400 });
+        }
+
+        const status = searchParams.get("status");
+
+        // Get all products (with optional status filter)
+        let productsQuery;
+        if (status) {
+          productsQuery = query(
+            collection(db, "products"),
+            where("status", "==", status)
+          );
+        } else {
+          productsQuery = query(collection(db, "products"));
+        }
+
+        const snapshot = await getDocs(productsQuery);
+        
+        // Search for matching item code (case-insensitive)
+        const searchCode = itemCode.trim().toLowerCase();
+        const matchedProduct = snapshot.docs.find((d) => {
+          const data = d.data();
+          
+          // Check new itemCodes format
+          if (data.itemCodes) {
+            for (const brand of Object.keys(data.itemCodes)) {
+              if (data.itemCodes[brand]?.toLowerCase() === searchCode) {
+                return true;
+              }
+            }
+          }
+          
+          // Check legacy fields
+          if (data.itemCode?.toLowerCase() === searchCode) return true;
+          if (data.litItemCode?.toLowerCase() === searchCode) return true;
+          if (data.ecoItemCode?.toLowerCase() === searchCode) return true;
+          
+          return false;
+        });
+
+        if (!matchedProduct) {
+          return NextResponse.json({ error: "Product not found with this item code" }, { status: 404 });
+        }
+
+        const data = matchedProduct.data();
+        // Migrate legacy itemCode fields to new itemCodes format
+        const itemCodes = migrateToItemCodes({
           itemCodes: data.itemCodes,
+          litItemCode: data.litItemCode,
+          ecoItemCode: data.ecoItemCode,
+          itemCode: data.itemCode,
+        });
+        
+        return NextResponse.json({
+          id: matchedProduct.id,
+          name: data.name,
+          slug: data.slug,
+          itemCode: data.itemCode,
+          itemCodes: hasAtLeastOneItemCode(itemCodes) ? itemCodes : undefined,
           itemDescription: data.itemDescription,
           shortDescription: data.shortDescription,
           productClass: data.productClass,
