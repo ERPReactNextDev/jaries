@@ -494,12 +494,15 @@ export default function APIManagementPage() {
                       List all products with optional filters. Requires <code className="bg-gray-100 px-1 py-0.5 rounded text-xs">products:read</code> permission.
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      <strong>Query Params:</strong> status (default: public), pageSize
+                      <strong>Query Params:</strong> status, pageSize (1-500), cursor
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Without <code className="bg-gray-100 px-1 py-0.5 rounded text-xs">pageSize</code>, the API reads all matching products in batches. For large catalogs, request pages with <code className="bg-gray-100 px-1 py-0.5 rounded text-xs">pageSize=500</code> and pass the returned <code className="bg-gray-100 px-1 py-0.5 rounded text-xs">nextCursor</code> as <code className="bg-gray-100 px-1 py-0.5 rounded text-xs">cursor</code> until it is <code className="bg-gray-100 px-1 py-0.5 rounded text-xs">null</code>. There is no total-record limit.
                     </p>
                     <div className="bg-gray-900 text-gray-100 p-3 rounded-lg text-xs font-mono overflow-x-auto">
                       <p className="text-green-400">// Example Request</p>
                       <p>curl -X GET \</p>
-                      <p>{'  '}https://your-domain.com/api/public-api?endpoint=products \</p>
+                      <p>{'  '}https://your-domain.com/api/public-api?endpoint=products&pageSize=500 \</p>
                       <p>{'  '}-H &quot;X-API-Key: YOUR_API_KEY&quot;</p>
                     </div>
                   </CollapsibleContent>

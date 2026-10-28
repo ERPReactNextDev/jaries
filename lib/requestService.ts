@@ -120,11 +120,13 @@ export function resolveProductMeta(
 /**
  * Determines the best TDS brand from a product's brand field.
  */
-function resolveTdsBrand(raw?: string | null): "LIT" | "ECOSHIFT" {
+function resolveTdsBrand(raw?: string | null): "LIT" | "ECOSHIFT" | "OKO" {
   const upper = String(raw ?? "")
     .toUpperCase()
     .trim();
-  return upper.includes("ECOSHIFT") ? "ECOSHIFT" : "LIT";
+  if (upper.includes("ECOSHIFT")) return "ECOSHIFT";
+  if (upper.includes("OKO")) return "OKO";
+  return "LIT";
 }
 
 /**

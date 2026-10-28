@@ -4,8 +4,8 @@ import React from "react";
 
 interface TdsPreviewProps {
   product: any;
-  headerBrand: "LIT" | "ECOSHIFT";
-  itemCodeBrand?: "LIT" | "ECOSHIFT";
+  headerBrand: "LIT" | "ECOSHIFT" | "OKO";
+  itemCodeBrand?: "LIT" | "ECOSHIFT" | "OKO";
 }
 
 // A4 base canvas (pt). Everything is laid out at this size, then scaled to fit.
@@ -36,6 +36,7 @@ function getFilledItemCodes(codes: any): Array<{ brand: string; code: string }> 
   const filled: Array<{ brand: string; code: string }> = [];
   if (codes.LIT) filled.push({ brand: "LIT", code: codes.LIT });
   if (codes.ECOSHIFT) filled.push({ brand: "ECOSHIFT", code: codes.ECOSHIFT });
+  if (codes.OKO) filled.push({ brand: "OKO", code: codes.OKO });
   return filled;
 }
 
@@ -90,7 +91,7 @@ export function TdsPreview({ product, headerBrand, itemCodeBrand }: TdsPreviewPr
     { label: "Base", url: p.baseImage },
     { label: "Illuminance Level", url: p.illuminanceLevelImage },
     { label: "Wiring Diagram", url: p.wiringDiagramImage },
-    { label: "Installation", url: p.installationImage },
+    { label: "Installation Guide", url: p.installationImage },
     { label: "Wiring Layout", url: p.wiringLayoutImage },
     { label: "Terminal Layout", url: p.terminalLayoutImage },
     { label: "Accessories", url: p.accessoriesImage },
@@ -184,19 +185,19 @@ export function TdsPreview({ product, headerBrand, itemCodeBrand }: TdsPreviewPr
             >
               <tbody>
                 <tr className="border-b border-gray-300">
-                  <td className="font-bold uppercase" style={{ ...cellStyle, width: "36%" }}>
-                    {displayItemCodeBrand} ITEM CODE :
-                  </td>
-                  <td className="uppercase" style={cellStyle}>
-                    {displayItemCode || "—"}
-                  </td>
-                </tr>
-                <tr className="border-b border-gray-300">
                   <td className="font-bold uppercase" style={cellStyle}>
                     BRAND :
                   </td>
                   <td className="font-bold uppercase" style={cellStyle}>
                     {headerBrand}
+                  </td>
+                </tr>
+                <tr className="border-b border-gray-300">
+                  <td className="font-bold uppercase" style={{ ...cellStyle, width: "36%" }}>
+                    {displayItemCodeBrand} ITEM CODE :
+                  </td>
+                  <td className="uppercase" style={cellStyle}>
+                    {displayItemCode || "—"}
                   </td>
                 </tr>
                 {technicalSpecs.map((group: any, gi: number) => (

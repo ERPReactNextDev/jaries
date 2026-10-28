@@ -69,6 +69,7 @@ import {
   ChevronRight,
   SlidersHorizontal as FilterIcon,
   Package2,
+  RefreshCw,
 } from "lucide-react";
 
 import { AppSidebar } from "@/components/sidebar/app-sidebar";
@@ -471,7 +472,7 @@ const PRODUCT_CLASS_OPTIONS: {
 ];
 
 const TDS_BRAND_OPTIONS: {
-  value: "LIT" | "ECOSHIFT";
+  value: "LIT" | "ECOSHIFT" | "OKO";
   label: string;
   description: string;
   activeColor: string;
@@ -490,6 +491,13 @@ const TDS_BRAND_OPTIONS: {
     description: "Ecoshift brand header & footer",
     activeColor: "bg-emerald-100 border-emerald-500 text-emerald-800",
     dot: "bg-emerald-500",
+  },
+  {
+    value: "OKO",
+    label: "Oko",
+    description: "Oko brand header & footer",
+    activeColor: "bg-cyan-100 border-cyan-500 text-cyan-800",
+    dot: "bg-cyan-500",
   },
 ];
 
@@ -693,6 +701,7 @@ function TdsPreviewDialog({
         technicalSpecs,
         brand,
         itemCodeBrand: brand, // Use the same brand for item code display
+        includeBrandAssets: true,
         mainImageUrl:
           product.mainImage ||
           (Array.isArray(product.rawImage)
@@ -891,15 +900,15 @@ function BulkGenerateTdsDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
   jobs: TdsJob[];
-  onStart: (headerBrand: "LIT" | "ECOSHIFT", itemCodeBrand: "LIT" | "ECOSHIFT", filteredProducts: Product[]) => void;
+  onStart: (headerBrand: "LIT" | "ECOSHIFT" | "OKO", itemCodeBrand: "LIT" | "ECOSHIFT" | "OKO", filteredProducts: Product[]) => void;
   isRunning: boolean;
   selectedProducts: Product[];
 }) {
   const [selectedHeaderBrand, setSelectedHeaderBrand] = React.useState<
-    "LIT" | "ECOSHIFT" | null
+    "LIT" | "ECOSHIFT" | "OKO" | null
   >(null);
   const [selectedItemCodeBrand, setSelectedItemCodeBrand] = React.useState<
-    "LIT" | "ECOSHIFT" | null
+    "LIT" | "ECOSHIFT" | "OKO" | null
   >(null);
   const [currentStep, setCurrentStep] = React.useState<1 | 2>(1);
   const [itemCodeFilter, setItemCodeFilter] = React.useState<"single" | "multiple" | null>(null);
@@ -951,14 +960,14 @@ function BulkGenerateTdsDialog({
     });
   }, [selectedProducts, itemCodeFilter, showFilterDropdown, singleCodeCount, multipleCodeCount]);
 
-  // Check if products have multiple item code brands (only LIT and ECOSHIFT)
+  // Check if products have multiple item code brands (LIT, ECOSHIFT, OKO)
   const hasMultipleItemCodeBrands = React.useMemo(() => {
-    const brands = new Set<"LIT" | "ECOSHIFT">();
+    const brands = new Set<"LIT" | "ECOSHIFT" | "OKO">();
     filteredProducts.forEach((product) => {
       const codes = resolveItemCodes(product);
       const filled = getFilledItemCodes(codes);
       filled.forEach(({ brand }) => {
-        if (brand === "LIT" || brand === "ECOSHIFT") {
+        if (brand === "LIT" || brand === "ECOSHIFT" || brand === "OKO") {
           brands.add(brand);
         }
       });
@@ -968,11 +977,12 @@ function BulkGenerateTdsDialog({
 
   // Get item codes for display
   const itemCodesDisplay = React.useMemo(() => {
-    const codes: Record<"LIT" | "ECOSHIFT", string> = { LIT: "", ECOSHIFT: "" };
+    const codes: Record<"LIT" | "ECOSHIFT" | "OKO", string> = { LIT: "", ECOSHIFT: "", OKO: "" };
     filteredProducts.forEach((product) => {
       const resolvedCodes = resolveItemCodes(product);
       if (resolvedCodes.LIT && !codes.LIT) codes.LIT = resolvedCodes.LIT;
       if (resolvedCodes.ECOSHIFT && !codes.ECOSHIFT) codes.ECOSHIFT = resolvedCodes.ECOSHIFT;
+      if (resolvedCodes.OKO && !codes.OKO) codes.OKO = resolvedCodes.OKO;
     });
     return codes;
   }, [filteredProducts]);
@@ -999,12 +1009,12 @@ function BulkGenerateTdsDialog({
     if (currentStep === 1 && selectedHeaderBrand) {
       // If only one item code brand exists, skip step 2 and generate directly
       if (!hasMultipleItemCodeBrands) {
-        const brands = new Set<"LIT" | "ECOSHIFT">();
+        const brands = new Set<"LIT" | "ECOSHIFT" | "OKO">();
         filteredProducts.forEach((product) => {
           const codes = resolveItemCodes(product);
           const filled = getFilledItemCodes(codes);
           filled.forEach(({ brand }) => {
-            if (brand === "LIT" || brand === "ECOSHIFT") {
+            if (brand === "LIT" || brand === "ECOSHIFT" || brand === "OKO") {
               brands.add(brand);
             }
           });
@@ -1914,39 +1924,46 @@ function ReadOnlyAllProductsView() {
   const [tdsPreviewProduct, setTdsPreviewProduct] =
     React.useState<Product | null>(null);
   const [bulkDownloadTdsOpen, setBulkDownloadTdsOpen] = React.useState(false);
+  const [isRefreshing, setIsRefreshing] = React.useState(false);
+
+  const fetchProducts = React.useCallback(async () => {
+    try {
+      const snap = await getDocs(
+        query(
+          collection(db, "products"),
+          orderBy("createdAt", "desc"),
+          limit(2000),
+        ),
+      );
+      const products = snap.docs.map(
+        (d) => ({ id: d.id, ...d.data() } as Product),
+      );
+      setData(products);
+    } catch (err) {
+      console.error("Failed to load products:", err);
+      toast.error("Failed to load products");
+    }
+  }, []);
 
   React.useEffect(() => {
     let cancelled = false;
 
     const fetchAll = async () => {
       setLoading(true);
-      try {
-        // Single query — fetch all products ordered by createdAt desc.
-        // Explicit limit(2000) overrides the client wrapper's DEFAULT_QUERY_LIMIT cap.
-        const snap = await getDocs(
-          query(
-            collection(db, "products"),
-            orderBy("createdAt", "desc"),
-            limit(2000),
-          ),
-        );
-        if (cancelled) return;
-        const products = snap.docs.map(
-          (d) => ({ id: d.id, ...d.data() } as Product),
-        );
-        setData(products);
-      } catch (err) {
-        if (cancelled) return;
-        console.error("Failed to load products:", err);
-        toast.error("Failed to load products");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+      await fetchProducts();
+      if (!cancelled) setLoading(false);
     };
 
     void fetchAll();
     return () => { cancelled = true; };
-  }, []);
+  }, [fetchProducts]);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await fetchProducts();
+    setIsRefreshing(false);
+    toast.success("Products refreshed");
+  };
 
   const uniqueFamilies = React.useMemo(() => {
     const s = new Set<string>();
@@ -2099,16 +2116,30 @@ function ReadOnlyAllProductsView() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search products…"
-            className="w-full bg-white/5 border border-white/10 rounded-2xl pl-8 pr-4 py-2.5 text-[11px] font-bold text-white placeholder:text-gray-600 outline-none focus:border-[#d11a2a]/40 transition-all"
+            className="w-full bg-white/5 border border-white/10 rounded-2xl pl-8 pr-20 py-2.5 text-[11px] font-bold text-white placeholder:text-gray-600 outline-none focus:border-[#d11a2a]/40 transition-all"
           />
-          {search && (
+          <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+            {search && (
+              <button
+                onClick={() => setSearch("")}
+                className="text-gray-600 hover:text-white"
+              >
+                <X size={12} />
+              </button>
+            )}
             <button
-              onClick={() => setSearch("")}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-600 hover:text-white"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className="text-gray-600 hover:text-white disabled:opacity-50"
+              title="Refresh products"
             >
-              <X size={12} />
+              {isRefreshing ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : (
+                <RefreshCw size={12} />
+              )}
             </button>
-          )}
+          </div>
         </div>
 
         <button
@@ -2368,39 +2399,48 @@ function FullAllProductsView() {
   const [isTdsDownloading, setIsTdsDownloading] = React.useState(false);
   const [sortOption, setSortOption] = React.useState<SortOption>(null);
   const [bulkDownloadTdsOpen, setBulkDownloadTdsOpen] = React.useState(false);
+  const [isRefreshing, setIsRefreshing] = React.useState(false);
   // ── Data Fetching ─────────────────────────────────────────────────────────
+
+  const fetchProducts = React.useCallback(async () => {
+    try {
+      // Explicit limit(2000) overrides the client wrapper's DEFAULT_QUERY_LIMIT cap.
+      const snap = await getDocs(
+        query(
+          collection(db, "products"),
+          orderBy("createdAt", "desc"),
+          limit(2000),
+        ),
+      );
+      const products = snap.docs.map(
+        (d) => ({ id: d.id, ...d.data() } as Product),
+      );
+      setData(products);
+    } catch (err) {
+      console.error("Failed to load products:", err);
+      toast.error("Failed to load products");
+    }
+  }, []);
 
   React.useEffect(() => {
     let cancelled = false;
     setLoading(true);
 
     const fetchAll = async () => {
-      try {
-        // Explicit limit(2000) overrides the client wrapper's DEFAULT_QUERY_LIMIT cap.
-        const snap = await getDocs(
-          query(
-            collection(db, "products"),
-            orderBy("createdAt", "desc"),
-            limit(2000),
-          ),
-        );
-        if (cancelled) return;
-        const products = snap.docs.map(
-          (d) => ({ id: d.id, ...d.data() } as Product),
-        );
-        setData(products);
-      } catch (err) {
-        if (cancelled) return;
-        console.error("Failed to load products:", err);
-        toast.error("Failed to load products");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+      await fetchProducts();
+      if (!cancelled) setLoading(false);
     };
 
     void fetchAll();
     return () => { cancelled = true; };
-  }, []);
+  }, [fetchProducts]);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await fetchProducts();
+    setIsRefreshing(false);
+    toast.success("Products refreshed");
+  };
 
   // Client-side search across itemDescription, all item codes, and name
   const filteredData = React.useMemo(() => {
@@ -2673,7 +2713,7 @@ function FullAllProductsView() {
     setBulkTdsOpen(true);
   };
 
-  const handleStartBulkTds = async (headerBrand: "LIT" | "ECOSHIFT", itemCodeBrand: "LIT" | "ECOSHIFT", filteredProducts: Product[]) => {
+  const handleStartBulkTds = async (headerBrand: "LIT" | "ECOSHIFT" | "OKO", itemCodeBrand: "LIT" | "ECOSHIFT" | "OKO", filteredProducts: Product[]) => {
     setIsTdsRunning(true);
     const productMap = new Map<string, Product>(
       filteredProducts.map((p) => [p.id, p]),
@@ -2730,6 +2770,7 @@ function FullAllProductsView() {
           technicalSpecs,
           brand: headerBrand, // Use headerBrand for header/footer
           itemCodeBrand, // Pass itemCodeBrand to TDS generator
+          includeBrandAssets: true,
           mainImageUrl:
             product.mainImage ||
             (Array.isArray(product.rawImage)
@@ -3623,8 +3664,40 @@ function FullAllProductsView() {
             onKeyDown={(e) => {
               if (e.key === "Escape") setShowSuggestions(false);
             }}
-            className="pl-9"
+            className="pl-9 pr-20"
           />
+          <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+            {globalFilter && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => setGlobalFilter("")}
+                className="h-6 w-6"
+                title="Clear search"
+              >
+                <X className="h-3 w-3" />
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => {
+                setShowSuggestions(false);
+                handleRefresh();
+              }}
+              disabled={isRefreshing}
+              className="h-6 w-6"
+              title="Refresh products"
+            >
+              {isRefreshing ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3 w-3" />
+              )}
+            </Button>
+          </div>
           {showSuggestions && suggestions.length > 0 && (
             <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-popover border rounded-lg shadow-lg overflow-hidden">
               {suggestions.map((product) => {

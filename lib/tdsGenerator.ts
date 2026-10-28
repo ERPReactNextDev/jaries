@@ -289,8 +289,21 @@ async function buildTdsPdf(
   const COL_LABEL = 210;
   const COL_VALUE = TABLE_W - COL_LABEL;
 
-  // When brand assets are included, reserve header space; otherwise start closer to top
-  const effectiveHeaderH = includeBrandAssets ? HEADER_H : 20;
+  // When brand assets are included, calculate actual header height from image
+  let effectiveHeaderH = 20;
+  let scaledHeaderH = 0;
+  if (includeBrandAssets) {
+    const assets = brandAssets(brand);
+    const headerB64 = await urlToBase64(`${origin}${assets.header}`);
+    if (headerB64) {
+      const { w: headerW, h: headerH } = await getImageDimensions(headerB64);
+      const ratio = PW / headerW;
+      scaledHeaderH = headerH * ratio;
+      effectiveHeaderH = scaledHeaderH;
+      pdf.addImage(headerB64, imgFormat(headerB64), 0, 0, PW, scaledHeaderH);
+    }
+  }
+
   const TOP_BLOCK_Y = effectiveHeaderH + 24;
   const TABLE_Y = TOP_BLOCK_Y + BOX_H + 20;
   const effectiveFooterReserve = includeBrandAssets ? FOOTER_RESERVE_H : 20;
@@ -315,15 +328,6 @@ async function buildTdsPdf(
     fontSize = Math.round((fontSize - FONT_SHRINK_STEP) * 100) / 100;
   }
   fontSize = Math.max(fontSize, MIN_FONT_SIZE);
-
-  // ── Optional brand header ─────────────────────────────────────────────────
-  if (includeBrandAssets) {
-    const assets = brandAssets(brand);
-    const headerB64 = await urlToBase64(`${origin}${assets.header}`);
-    if (headerB64) {
-      pdf.addImage(headerB64, imgFormat(headerB64), 0, 0, PW, HEADER_H);
-    }
-  }
 
   // Product image box
   pdf.setDrawColor(0, 0, 0);
@@ -431,8 +435,6 @@ async function buildTdsPdf(
     const rowBlockH = DRAWING_LABEL_H + effectiveImgH + DRAWING_ROW_GAP;
     let curY = tableEndY + DRAWING_SECTION_TOP_GAP;
 
-    const perColW = TABLE_W / DRAWINGS_PER_ROW;
-    const slotImgW = perColW - DRAWING_IMG_PAD * 2;
     const allB64 = await Promise.all(
       activeSlots.map((slot) => urlToBase64(slot.url)),
     );
@@ -443,6 +445,9 @@ async function buildTdsPdf(
       rowStart += DRAWINGS_PER_ROW
     ) {
       const rowSlots = activeSlots.slice(rowStart, rowStart + DRAWINGS_PER_ROW);
+      const perColW =
+        TABLE_W / (rowSlots.length === 2 ? 2 : DRAWINGS_PER_ROW);
+      const slotImgW = perColW - DRAWING_IMG_PAD * 2;
       const groupW = rowSlots.length * perColW;
       const groupOffX = MARGIN_L + (TABLE_W - groupW) / 2;
 
@@ -485,10 +490,17 @@ async function buildTdsPdf(
     const assets = brandAssets(brand);
     const footerB64 = await urlToBase64(`${origin}${assets.footer}`);
     if (footerB64) {
-      const { w: fw, h: fh } = await getImageDimensions(footerB64);
-      const ratio = PW / fw;
-      const finalH = fh * ratio;
-      pdf.addImage(footerB64, imgFormat(footerB64), 0, PH - finalH, PW, finalH);
+      const { w: footerW, h: footerH } = await getImageDimensions(footerB64);
+      const ratio = PW / footerW;
+      const scaledFooterH = footerH * ratio;
+      pdf.addImage(
+        footerB64,
+        imgFormat(footerB64),
+        0,
+        PH - scaledFooterH,
+        PW,
+        scaledFooterH,
+      );
     }
   }
 
@@ -554,6 +566,9 @@ function buildItemCodeRows(input: {
     rows.push(["LIT ITEM CODE :", caps(input.litItemCode)]);
   } else if (input.itemCodeBrand === "ECOSHIFT" && !isBlankCode(input.ecoItemCode)) {
     rows.push(["ECOSHIFT ITEM CODE :", caps(input.ecoItemCode)]);
+  } else if (input.itemCodeBrand === "OKO") {
+    // OKO is only supported in the new itemCodes schema
+    // If itemCodeBrand is OKO but using legacy fields, skip
   } else {
     // Show both if no specific brand requested
     if (!isBlankCode(input.litItemCode)) {
@@ -579,7 +594,7 @@ function buildDrawingSlots(input: GenerateTdsInput): DrawingSlot[] {
     { label: "Base", url: input.baseImageUrl ?? "" },
     { label: "Illuminance Level", url: input.illuminanceLevelUrl ?? "" },
     { label: "Wiring Diagram", url: input.wiringDiagramUrl ?? "" },
-    { label: "Installation", url: input.installationUrl ?? "" },
+    { label: "Installation Guide", url: input.installationUrl ?? "" },
     { label: "Wiring Layout", url: input.wiringLayoutUrl ?? "" },
     { label: "Terminal Layout", url: input.terminalLayoutUrl ?? "" },
     { label: "Accessories", url: input.accessoriesImageUrl ?? "" },
@@ -616,12 +631,8 @@ export async function generateTdsPdf(input: GenerateTdsInput): Promise<Blob> {
     ecoItemCode: input.ecoItemCode,
     itemCodeBrand: input.itemCodeBrand,
   });
+  rows.push(["BRAND :", { content: brand, styles: { fontStyle: "bold" } }]);
   rows.push(...itemCodeRows);
-
-  // Brand row (only when not already shown via itemCodes)
-  if (itemCodeRows.length === 0) {
-    rows.push(["BRAND :", { content: brand, styles: { fontStyle: "bold" } }]);
-  }
 
   (input.technicalSpecs ?? []).forEach((group) => {
     const validSpecs = (group.specs ?? []).filter(

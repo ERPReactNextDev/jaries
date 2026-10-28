@@ -8,7 +8,7 @@
  *  - Supports new `itemCodes` schema ({ ECOSHIFT?, LIT?, LUMERA?, OKO?, ZUMTOBEL? })
  *  - At least one itemCode must be filled per row (rows without codes are skipped)
  *  - Legacy litItemCode / ecoItemCode columns still recognised and migrated
- *  - Duplicate check updated to use itemCodes
+ *  - Duplicate products refresh technical specs when the import provides them
  *  - TDS generation uses new plain-tabular default (includeBrandAssets = false)
  *  - Excel-only bulk import flow with product class override support
  */
@@ -221,6 +221,9 @@ const IMG_HEADER_TO_FIELD: Record<string, keyof ParsedProduct> = {
   "ILLUMINANCE LEVEL": "illuminanceLevelUrl",
   "WIRING DIAGRAM": "wiringDiagramUrl",
   INSTALLATION: "installationUrl",
+  "INSTALLATION IMAGE": "installationUrl",
+  "INSTALLATION GUIDE": "installationUrl",
+  "INSTALLATION GUIDE IMAGE": "installationUrl",
   "WIRING LAYOUT": "wiringLayoutUrl",
   "TERMINAL LAYOUT": "terminalLayoutUrl",
   ACCESSORIES: "accessoriesImageUrl",
@@ -492,7 +495,8 @@ async function parseWorkbook(file: File): Promise<{
     const imgVals: Partial<Record<keyof ParsedProduct, string>> = {};
     for (const [colStr, field] of Object.entries(imgColMap)) {
       if (field === "galleryImageUrls") continue;
-      imgVals[field] = row[Number(colStr)]?.trim() ?? "";
+      const value = row[Number(colStr)]?.trim() ?? "";
+      if (value && !imgVals[field]) imgVals[field] = value;
     }
 
     products.push({
@@ -599,12 +603,14 @@ function isNaValue(code: string): boolean {
 
 async function checkDuplicate(itemCodes: ItemCodes): Promise<{
   isDuplicate: boolean;
+  productId: string | null;
   reason: string;
 }> {
   const filled = getFilledItemCodes(itemCodes);
 
   // If all codes are N/A or empty, bypass
-  if (filled.length === 0) return { isDuplicate: false, reason: "" };
+  if (filled.length === 0)
+    return { isDuplicate: false, productId: null, reason: "" };
 
   for (const { brand, code } of filled) {
     // Check both new schema and legacy fields
@@ -618,7 +624,11 @@ async function checkDuplicate(itemCodes: ItemCodes): Promise<{
       ),
     );
     if (!snapNew.empty)
-      return { isDuplicate: true, reason: `${brand} item code "${code}"` };
+      return {
+        isDuplicate: true,
+        productId: snapNew.docs[0].id,
+        reason: `${brand} item code "${code}"`,
+      };
 
     // Legacy field check
     if (fieldToCheck) {
@@ -629,11 +639,44 @@ async function checkDuplicate(itemCodes: ItemCodes): Promise<{
         ),
       );
       if (!snapLegacy.empty)
-        return { isDuplicate: true, reason: `${brand} item code "${code}" (legacy)` };
+        return {
+          isDuplicate: true,
+          productId: snapLegacy.docs[0].id,
+          reason: `${brand} item code "${code}" (legacy)`,
+        };
     }
+
+    const snapItemCode = await getDocs(
+      query(collection(db, "products"), where("itemCode", "==", code)),
+    );
+    if (!snapItemCode.empty)
+      return {
+        isDuplicate: true,
+        productId: snapItemCode.docs[0].id,
+        reason: `${brand} item code "${code}" (legacy itemCode)`,
+      };
   }
 
-  return { isDuplicate: false, reason: "" };
+  return { isDuplicate: false, productId: null, reason: "" };
+}
+
+function buildTechnicalSpecs(
+  specsByGroup: ParsedProduct["specs"],
+): TechnicalSpec[] {
+  return Object.entries(specsByGroup)
+    .map(([specGroup, entries]) => ({
+      specGroup: specGroup.toUpperCase().trim(),
+      specs: entries
+        .filter((entry) => {
+          const value = entry.value.toUpperCase().trim();
+          return value !== "" && value !== "N/A";
+        })
+        .map((entry) => ({
+          name: entry.label.toUpperCase().trim(),
+          value: entry.value.toUpperCase().trim(),
+        })),
+    }))
+    .filter((group) => group.specs.length > 0);
 }
 
 // ─── Shopify helpers (unchanged from original) ────────────────────────────────
@@ -1511,8 +1554,26 @@ export default function BulkUploader({
 
       try {
         // UPDATED: Use new itemCodes-based duplicate check
-        const { isDuplicate, reason } = await checkDuplicate(p.itemCodes);
+        const { isDuplicate, productId, reason } = await checkDuplicate(
+          p.itemCodes,
+        );
         if (isDuplicate) {
+          const technicalSpecs = buildTechnicalSpecs(p.specs);
+          if (productId && technicalSpecs.length > 0) {
+            await updateDoc(doc(db, "products", productId), {
+              technicalSpecs,
+              updatedAt: serverTimestamp(),
+            });
+            addLog(
+              "ok",
+              `  ✅ Updated ${technicalSpecs.reduce((total, group) => total + group.specs.length, 0)} technical spec(s) for existing product "${p.itemDescription}"`,
+            );
+            setStats((prev) => ({ ...prev, success: prev.success + 1 }));
+            setProgress(((i + 1) / allProducts.length) * 100);
+            await new Promise((r) => setTimeout(r, 20));
+            continue;
+          }
+
           addLog(
             "skip",
             `⏭  SKIPPED (duplicate ${reason}): ${p.itemDescription}`,
@@ -1561,20 +1622,7 @@ export default function BulkUploader({
 
         const rawImage = rawImageUploaded || mainImage || "";
 
-        const technicalSpecs = Object.entries(p.specs)
-          .map(([specGroup, entries]) => ({
-            specGroup: specGroup.toUpperCase().trim(),
-            specs: entries
-              .filter((e) => {
-                const v = e.value.toUpperCase().trim();
-                return v !== "" && v !== "N/A";
-              })
-              .map((e) => ({
-                name: e.label.toUpperCase().trim(),
-                value: e.value.toUpperCase().trim(),
-              })),
-          }))
-          .filter((group) => group.specs.length > 0);
+        const technicalSpecs = buildTechnicalSpecs(p.specs);
 
         const slug = (p.ecoItemCode || p.litItemCode || p.itemDescription)
           .toLowerCase()

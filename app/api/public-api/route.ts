@@ -9,16 +9,71 @@ import {
   getDoc,
   updateDoc,
   Timestamp,
-  orderBy,
+  startAfter,
   limit,
+  orderBy,
+  type DocumentData,
+  type Query,
+  type QueryDocumentSnapshot,
+  type QueryConstraint,
+  type QuerySnapshot,
 } from "@/lib/firestore/client";
 import crypto from "crypto";
 import { migrateToItemCodes, hasAtLeastOneItemCode } from "@/lib/produc";
 
 export const dynamic = "force-dynamic";
 
+const PRODUCT_READ_BATCH_SIZE = 500;
+const MAX_PRODUCT_PAGE_SIZE = 500;
+
 function hashApiKey(key: string): string {
   return crypto.createHash("sha256").update(key).digest("hex");
+}
+
+function buildProductsQuery(
+  status: string | null,
+  cursor: string | null,
+  pageSize: number,
+): Query<DocumentData> {
+  const constraints: QueryConstraint[] = [orderBy("__name__", "asc")];
+  if (status) constraints.unshift(where("status", "==", status));
+  if (cursor) constraints.push(startAfter(cursor));
+  constraints.push(limit(pageSize));
+  return query(collection(db, "products"), ...constraints);
+}
+
+function serializeProduct(id: string, data: DocumentData) {
+  const itemCodes = migrateToItemCodes({
+    itemCodes: data.itemCodes,
+    litItemCode: data.litItemCode,
+    ecoItemCode: data.ecoItemCode,
+    itemCode: data.itemCode,
+  });
+  return {
+    id,
+    name: data.name,
+    slug: data.slug,
+    itemCode: data.itemCode,
+    itemCodes: hasAtLeastOneItemCode(itemCodes) ? itemCodes : undefined,
+    itemDescription: data.itemDescription,
+    shortDescription: data.shortDescription,
+    productClass: data.productClass,
+    productFamily: data.productFamily,
+    productUsage: data.productUsage,
+    brand: data.brand,
+    mainImage: data.mainImage,
+    baseImage: data.baseImage,
+    galleryImages: data.galleryImages,
+    technicalSpecs: data.technicalSpecs,
+    regularPrice: data.regularPrice,
+    salePrice: data.salePrice,
+    promoPrice: data.promoPrice,
+    status: data.status,
+    seo: data.seo,
+    websites: data.websites,
+    createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
+    updatedAt: data.updatedAt?.toDate?.()?.toISOString() || null,
+  };
 }
 
 async function validateApiKey(
@@ -85,57 +140,65 @@ export async function GET(req: NextRequest) {
         }
 
         const status = searchParams.get("status");
+        const pageSizeParam = searchParams.get("pageSize");
+        const pageSize = pageSizeParam === null ? null : Number(pageSizeParam);
+        const cursor = searchParams.get("cursor");
 
-        let productsQuery;
-        if (status) {
-          productsQuery = query(
-            collection(db, "products"),
-            where("status", "==", status)
+        if (
+          pageSize !== null &&
+          (!Number.isInteger(pageSize) ||
+            pageSize < 1 ||
+            pageSize > MAX_PRODUCT_PAGE_SIZE)
+        ) {
+          return NextResponse.json(
+            { error: `pageSize must be an integer between 1 and ${MAX_PRODUCT_PAGE_SIZE}` },
+            { status: 400 },
           );
-        } else {
-          productsQuery = query(collection(db, "products"));
         }
 
-        const snapshot = await getDocs(productsQuery);
-        const products = snapshot.docs.map((d) => {
-          const data = d.data();
-          // Migrate legacy itemCode fields to new itemCodes format
-          const itemCodes = migrateToItemCodes({
-            itemCodes: data.itemCodes,
-            litItemCode: data.litItemCode,
-            ecoItemCode: data.ecoItemCode,
-            itemCode: data.itemCode,
-          });
-          return {
-            id: d.id,
-            name: data.name,
-            slug: data.slug,
-            itemCode: data.itemCode,
-            itemCodes: hasAtLeastOneItemCode(itemCodes) ? itemCodes : undefined,
-            itemDescription: data.itemDescription,
-            shortDescription: data.shortDescription,
-            productClass: data.productClass,
-            productFamily: data.productFamily,
-            productUsage: data.productUsage,
-            brand: data.brand,
-            mainImage: data.mainImage,
-            baseImage: data.baseImage,
-            galleryImages: data.galleryImages,
-            technicalSpecs: data.technicalSpecs,
-            regularPrice: data.regularPrice,
-            salePrice: data.salePrice,
-            promoPrice: data.promoPrice,
-            status: data.status,
-            seo: data.seo,
-            websites: data.websites,
-            createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
-            updatedAt: data.updatedAt?.toDate?.()?.toISOString() || null,
-          };
-        });
+        if (cursor && pageSize === null) {
+          return NextResponse.json(
+            { error: "pageSize is required when using cursor" },
+            { status: 400 },
+          );
+        }
+
+        const products: ReturnType<typeof serializeProduct>[] = [];
+        let nextCursor: string | null = null;
+
+        if (pageSize !== null) {
+          const snapshot: QuerySnapshot<DocumentData> = await getDocs(
+            buildProductsQuery(status, cursor, pageSize + 1),
+          );
+          const pageDocs = snapshot.docs.slice(0, pageSize);
+          products.push(
+            ...pageDocs.map((product) =>
+              serializeProduct(product.id, product.data()),
+            ),
+          );
+          if (snapshot.docs.length > pageSize && pageDocs.length > 0) {
+            nextCursor = pageDocs[pageDocs.length - 1].id;
+          }
+        } else {
+          let batchCursor: string | null = null;
+          while (true) {
+            const snapshot: QuerySnapshot<DocumentData> = await getDocs(
+              buildProductsQuery(status, batchCursor, PRODUCT_READ_BATCH_SIZE),
+            );
+            products.push(
+              ...snapshot.docs.map((product) =>
+                serializeProduct(product.id, product.data()),
+              ),
+            );
+            if (snapshot.docs.length < PRODUCT_READ_BATCH_SIZE) break;
+            batchCursor = snapshot.docs[snapshot.docs.length - 1].id;
+          }
+        }
 
         return NextResponse.json({
           data: products,
           count: products.length,
+          nextCursor,
         });
       }
 
@@ -207,40 +270,39 @@ export async function GET(req: NextRequest) {
 
         const status = searchParams.get("status");
 
-        // Get all products (with optional status filter)
-        let productsQuery;
-        if (status) {
-          productsQuery = query(
-            collection(db, "products"),
-            where("status", "==", status)
-          );
-        } else {
-          productsQuery = query(collection(db, "products"));
-        }
-
-        const snapshot = await getDocs(productsQuery);
-        
-        // Search for matching item code (case-insensitive)
+        let cursor: string | null = null;
+        let matchedProduct: QueryDocumentSnapshot<DocumentData> | null = null;
         const searchCode = itemCode.trim().toLowerCase();
-        const matchedProduct = snapshot.docs.find((d) => {
-          const data = d.data();
-          
-          // Check new itemCodes format
-          if (data.itemCodes) {
-            for (const brand of Object.keys(data.itemCodes)) {
-              if (data.itemCodes[brand]?.toLowerCase() === searchCode) {
-                return true;
+        while (!matchedProduct) {
+          const snapshot: QuerySnapshot<DocumentData> = await getDocs(
+            buildProductsQuery(status, cursor, PRODUCT_READ_BATCH_SIZE),
+          );
+          matchedProduct = snapshot.docs.find((d) => {
+            const data = d.data();
+
+            if (data.itemCodes) {
+              for (const brand of Object.keys(data.itemCodes)) {
+                if (data.itemCodes[brand]?.toLowerCase() === searchCode) {
+                  return true;
+                }
               }
             }
+
+            if (data.itemCode?.toLowerCase() === searchCode) return true;
+            if (data.litItemCode?.toLowerCase() === searchCode) return true;
+            if (data.ecoItemCode?.toLowerCase() === searchCode) return true;
+
+            return false;
+          }) ?? null;
+
+          if (
+            matchedProduct ||
+            snapshot.docs.length < PRODUCT_READ_BATCH_SIZE
+          ) {
+            break;
           }
-          
-          // Check legacy fields
-          if (data.itemCode?.toLowerCase() === searchCode) return true;
-          if (data.litItemCode?.toLowerCase() === searchCode) return true;
-          if (data.ecoItemCode?.toLowerCase() === searchCode) return true;
-          
-          return false;
-        });
+          cursor = snapshot.docs[snapshot.docs.length - 1].id;
+        }
 
         if (!matchedProduct) {
           return NextResponse.json({ error: "Product not found with this item code" }, { status: 404 });
@@ -285,10 +347,10 @@ export async function GET(req: NextRequest) {
       default:
         return NextResponse.json({ error: "Invalid endpoint" }, { status: 400 });
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Public API error:", error);
     return NextResponse.json(
-      { error: error.message || "Internal server error" },
+      { error: error instanceof Error ? error.message : "Internal server error" },
       { status: 500, headers: { "Cache-Control": "no-store" } }
     );
   }

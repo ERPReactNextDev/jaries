@@ -8,14 +8,20 @@ import {
   query,
   where,
   updateDoc,
-  getDoc,
-  deleteDoc,
   Timestamp,
+  startAfter,
+  limit,
+  type DocumentData,
+  type Query,
+  type QueryDocumentSnapshot,
+  type QuerySnapshot,
 } from "@/lib/firestore/client";
 import { getSession } from "@/lib/session";
 import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
+
+const API_KEY_READ_BATCH_SIZE = 500;
 
 function generateApiKey(): string {
   return "jari_" + crypto.randomBytes(32).toString("hex");
@@ -80,22 +86,54 @@ async function handleRequest(req: NextRequest) {
       }
 
       case "list": {
-        const keysQuery = query(collection(db, "apiKeys"), where("isActive", "==", true));
-        const snapshot = await getDocs(keysQuery);
-        const keys = snapshot.docs.map((d) => {
-          const data = d.data();
-          return {
-            keyId: data.keyId,
-            name: data.name,
-            description: data.description,
-            permissions: data.permissions,
-            isActive: data.isActive,
-            createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
-            createdBy: data.createdBy,
-            lastUsedAt: data.lastUsedAt?.toDate?.()?.toISOString() || null,
-            usageCount: data.usageCount || 0,
-          };
-        });
+        const keys: Array<{
+          keyId: string;
+          name: string;
+          description: string;
+          permissions: string[];
+          isActive: boolean;
+          createdAt: string | null;
+          createdBy: string;
+          lastUsedAt: string | null;
+          usageCount: number;
+        }> = [];
+        let cursor: QueryDocumentSnapshot<DocumentData> | null = null;
+
+        while (true) {
+          const keysQuery: Query<DocumentData> = cursor
+            ? query(
+                collection(db, "apiKeys"),
+                where("isActive", "==", true),
+                startAfter(cursor),
+                limit(API_KEY_READ_BATCH_SIZE),
+              )
+            : query(
+                collection(db, "apiKeys"),
+                where("isActive", "==", true),
+                limit(API_KEY_READ_BATCH_SIZE),
+              );
+          const snapshot: QuerySnapshot<DocumentData> = await getDocs(keysQuery);
+          keys.push(
+            ...snapshot.docs.map((d) => {
+              const data = d.data();
+              return {
+                keyId: data.keyId,
+                name: data.name,
+                description: data.description,
+                permissions: data.permissions,
+                isActive: data.isActive,
+                createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
+                createdBy: data.createdBy,
+                lastUsedAt: data.lastUsedAt?.toDate?.()?.toISOString() || null,
+                usageCount: data.usageCount || 0,
+              };
+            }),
+          );
+
+          if (snapshot.docs.length < API_KEY_READ_BATCH_SIZE) break;
+          cursor = snapshot.docs[snapshot.docs.length - 1];
+        }
+
         return NextResponse.json({ keys });
       }
 
@@ -120,10 +158,10 @@ async function handleRequest(req: NextRequest) {
       default:
         return NextResponse.json({ error: "Invalid action" }, { status: 400 });
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("API Keys error:", error);
     return NextResponse.json(
-      { error: error.message || "Internal server error" },
+      { error: error instanceof Error ? error.message : "Internal server error" },
       { status: 500, headers: { "Cache-Control": "no-store" } }
     );
   }
