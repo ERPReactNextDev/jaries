@@ -1559,15 +1559,36 @@ export default function BulkUploader({
         );
         if (isDuplicate) {
           const technicalSpecs = buildTechnicalSpecs(p.specs);
-          if (productId && technicalSpecs.length > 0) {
+          const dimensionalDrawingImage =
+            productId && p.dimensionalDrawingUrl
+              ? await safeUploadUrl(p.dimensionalDrawingUrl, (message) =>
+                  addLog("warn", message),
+                )
+              : "";
+
+          if (
+            productId &&
+            (technicalSpecs.length > 0 || dimensionalDrawingImage)
+          ) {
             await updateDoc(doc(db, "products", productId), {
-              technicalSpecs,
+              ...(technicalSpecs.length > 0 ? { technicalSpecs } : {}),
+              ...(dimensionalDrawingImage
+                ? { dimensionalDrawingImage }
+                : {}),
               updatedAt: serverTimestamp(),
             });
-            addLog(
-              "ok",
-              `  ✅ Updated ${technicalSpecs.reduce((total, group) => total + group.specs.length, 0)} technical spec(s) for existing product "${p.itemDescription}"`,
-            );
+            if (technicalSpecs.length > 0) {
+              addLog(
+                "ok",
+                `  ✅ Updated ${technicalSpecs.reduce((total, group) => total + group.specs.length, 0)} technical spec(s) for existing product "${p.itemDescription}"`,
+              );
+            }
+            if (dimensionalDrawingImage) {
+              addLog(
+                "ok",
+                `  ✅ Updated dimensional drawing for existing product "${p.itemDescription}"`,
+              );
+            }
             setStats((prev) => ({ ...prev, success: prev.success + 1 }));
             setProgress(((i + 1) / allProducts.length) * 100);
             await new Promise((r) => setTimeout(r, 20));

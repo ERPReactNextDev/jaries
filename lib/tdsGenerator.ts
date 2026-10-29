@@ -170,49 +170,78 @@ async function urlToBase64(url: string): Promise<string | null> {
   }
 }
 
-function getImageDimensions(b64: string): Promise<{ w: number; h: number }> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => resolve({ w: img.width, h: img.height });
-    img.onerror = () => resolve({ w: 100, h: 100 });
-    img.src = b64;
-  });
+interface PreparedPdfImage {
+  data: string;
+  w: number;
+  h: number;
 }
 
-function imgFormat(b64: string): string {
-  if (/^data:image\/jpe?g/i.test(b64)) return "JPEG";
-  if (/^data:image\/webp/i.test(b64)) return "WEBP";
-  return "PNG";
+function preparePdfImage(b64: string): Promise<PreparedPdfImage> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const w = img.naturalWidth || img.width;
+      const h = img.naturalHeight || img.height;
+      if (!w || !h) {
+        reject(new Error("Unable to read image dimensions for TDS PDF."));
+        return;
+      }
+
+      const scale = Math.min(1, 4096 / Math.max(w, h));
+      const canvasW = Math.max(1, Math.round(w * scale));
+      const canvasH = Math.max(1, Math.round(h * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = canvasW;
+      canvas.height = canvasH;
+      const context = canvas.getContext("2d");
+      if (!context) {
+        reject(new Error("Unable to prepare image for TDS PDF."));
+        return;
+      }
+
+      try {
+        context.drawImage(img, 0, 0, canvasW, canvasH);
+        resolve({ data: canvas.toDataURL("image/png"), w: canvasW, h: canvasH });
+      } catch (error) {
+        reject(error);
+      }
+    };
+    img.onerror = () => reject(new Error("Unable to load image for TDS PDF."));
+    img.src = b64;
+  });
 }
 
 // ─── Page layout constants ────────────────────────────────────────────────────
 
 const MARGIN_L = 28;
 const MARGIN_R = 28;
-const HEADER_H = 100;
 const BOX_W = 155;
 const BOX_H = 130;
 const BOX_PAD = 8;
 const GAP_IMG_TEXT = 24;
 
 const DRAWINGS_PER_ROW = 3;
-const DRAWING_IMG_H = 165;
-const MIN_DRAWING_IMG_H = 60;
 const DRAWING_LABEL_H = 16;
 const DRAWING_ROW_GAP = 8;
 const DRAWING_SECTION_TOP_GAP = 10;
 const DRAWING_IMG_PAD = 3;
-const FOOTER_RESERVE_H = 72;
 const MIN_FONT_SIZE = 6.5;
 const MAX_FONT_SIZE = 8.5;
 const FONT_SHRINK_STEP = 0.25;
 
+function drawingImageHeight(rowCount: number): number {
+  if (rowCount === 1) return 165;
+  if (rowCount === 2) return 115;
+  if (rowCount === 3) return 88;
+  return 74;
+}
+
 function budgetDrawingHeight(slotCount: number): number {
   if (slotCount === 0) return 0;
   const rows = Math.ceil(slotCount / DRAWINGS_PER_ROW);
-  const imgH = rows === 1 ? 120 : rows === 2 ? 90 : rows === 3 ? 72 : 62;
   return (
-    DRAWING_SECTION_TOP_GAP + rows * (DRAWING_LABEL_H + imgH + DRAWING_ROW_GAP)
+    DRAWING_SECTION_TOP_GAP +
+    rows * (DRAWING_LABEL_H + drawingImageHeight(rows) + DRAWING_ROW_GAP)
   );
 }
 
@@ -291,28 +320,33 @@ async function buildTdsPdf(
 
   // When brand assets are included, calculate actual header height from image
   let effectiveHeaderH = 20;
-  let scaledHeaderH = 0;
+  let footerImage: PreparedPdfImage | null = null;
+  let effectiveFooterReserve = 20;
   if (includeBrandAssets) {
     const assets = brandAssets(brand);
     const headerB64 = await urlToBase64(`${origin}${assets.header}`);
     if (headerB64) {
-      const { w: headerW, h: headerH } = await getImageDimensions(headerB64);
-      const ratio = PW / headerW;
-      scaledHeaderH = headerH * ratio;
+      const header = await preparePdfImage(headerB64);
+      const scaledHeaderH = header.h * (PW / header.w);
       effectiveHeaderH = scaledHeaderH;
-      pdf.addImage(headerB64, imgFormat(headerB64), 0, 0, PW, scaledHeaderH);
+      pdf.addImage(header.data, "PNG", 0, 0, PW, scaledHeaderH);
+    }
+
+    const footerB64 = await urlToBase64(`${origin}${assets.footer}`);
+    if (footerB64) {
+      footerImage = await preparePdfImage(footerB64);
+      effectiveFooterReserve = footerImage.h * (PW / footerImage.w);
     }
   }
 
   const TOP_BLOCK_Y = effectiveHeaderH + 24;
   const TABLE_Y = TOP_BLOCK_Y + BOX_H + 20;
-  const effectiveFooterReserve = includeBrandAssets ? FOOTER_RESERVE_H : 20;
 
   const activeSlots = drawingSlots.filter((s) => !!s.url.trim());
 
   const availableH = PH - TABLE_Y - effectiveFooterReserve;
   const tieredDrawH = budgetDrawingHeight(activeSlots.length);
-  const maxTableH = Math.max(availableH - tieredDrawH, 60);
+  const maxTableH = Math.max(availableH - tieredDrawH, 0);
 
   let fontSize = MAX_FONT_SIZE;
   while (fontSize >= MIN_FONT_SIZE) {
@@ -337,7 +371,8 @@ async function buildTdsPdf(
   if (mainImageUrl) {
     const b64 = await urlToBase64(mainImageUrl);
     if (b64) {
-      const { w, h } = await getImageDimensions(b64);
+      const image = await preparePdfImage(b64);
+      const { w, h } = image;
       const ratio = Math.min(
         (BOX_W - BOX_PAD * 2) / w,
         (BOX_H - BOX_PAD * 2) / h,
@@ -345,8 +380,8 @@ async function buildTdsPdf(
       const fw = w * ratio;
       const fh = h * ratio;
       pdf.addImage(
-        b64,
-        imgFormat(b64),
+        image.data,
+        "PNG",
         MARGIN_L + (BOX_W - fw) / 2,
         TOP_BLOCK_Y + (BOX_H - fh) / 2,
         fw,
@@ -425,12 +460,8 @@ async function buildTdsPdf(
   // Drawings section
   if (activeSlots.length > 0) {
     const tableEndY = (pdf as any).lastAutoTable.finalY as number;
-    const remainingH =
-      PH - effectiveFooterReserve - tableEndY - DRAWING_SECTION_TOP_GAP;
     const numDrawingRows = Math.ceil(activeSlots.length / DRAWINGS_PER_ROW);
-    const perRowBudget = numDrawingRows > 0 ? remainingH / numDrawingRows : 0;
-    const rawImgH = perRowBudget - DRAWING_LABEL_H - DRAWING_ROW_GAP;
-    const effectiveImgH = Math.max(25, Math.min(DRAWING_IMG_H, rawImgH));
+    const effectiveImgH = drawingImageHeight(numDrawingRows);
 
     const rowBlockH = DRAWING_LABEL_H + effectiveImgH + DRAWING_ROW_GAP;
     let curY = tableEndY + DRAWING_SECTION_TOP_GAP;
@@ -471,14 +502,15 @@ async function buildTdsPdf(
       for (let colIdx = 0; colIdx < rowSlots.length; colIdx++) {
         const b64 = allB64[rowStart + colIdx];
         if (!b64) continue;
-        const { w: natW, h: natH } = await getImageDimensions(b64);
+        const image = await preparePdfImage(b64);
+        const { w: natW, h: natH } = image;
         const scale = Math.min(slotImgW / natW, effectiveImgH / natH);
         const fw = natW * scale;
         const fh = natH * scale;
         const slotOriginX = groupOffX + colIdx * perColW + DRAWING_IMG_PAD;
         const drawX = slotOriginX + (slotImgW - fw) / 2;
         const drawY = imgRowY + (effectiveImgH - fh) / 2;
-        pdf.addImage(b64, imgFormat(b64), drawX, drawY, fw, fh);
+        pdf.addImage(image.data, "PNG", drawX, drawY, fw, fh);
       }
 
       curY += rowBlockH;
@@ -486,22 +518,15 @@ async function buildTdsPdf(
   }
 
   // ── Optional brand footer ─────────────────────────────────────────────────
-  if (includeBrandAssets) {
-    const assets = brandAssets(brand);
-    const footerB64 = await urlToBase64(`${origin}${assets.footer}`);
-    if (footerB64) {
-      const { w: footerW, h: footerH } = await getImageDimensions(footerB64);
-      const ratio = PW / footerW;
-      const scaledFooterH = footerH * ratio;
-      pdf.addImage(
-        footerB64,
-        imgFormat(footerB64),
-        0,
-        PH - scaledFooterH,
-        PW,
-        scaledFooterH,
-      );
-    }
+  if (footerImage) {
+    pdf.addImage(
+      footerImage.data,
+      "PNG",
+      0,
+      PH - effectiveFooterReserve,
+      PW,
+      effectiveFooterReserve,
+    );
   }
 
   return pdf.output("blob");
