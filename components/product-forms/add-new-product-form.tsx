@@ -94,7 +94,11 @@ import { toast } from "sonner";
 import { logAuditEvent } from "@/lib/logger";
 
 // ─── New itemCodes schema ─────────────────────────────────────────────────────
-import type { ItemCodes, ItemCodeBrand } from "@/types/product";
+import type {
+  ItemCodes,
+  ItemCodeBrand,
+  TechnicalSpec,
+} from "@/types/product";
 import {
   migrateToItemCodes,
   getPrimaryItemCode,
@@ -1003,6 +1007,9 @@ export default function AddNewProduct({
   const [status, setStatus] = useState<"draft" | "public">(
     editData?.status || "draft",
   );
+  const [editableTechnicalSpecs, setEditableTechnicalSpecs] = useState<
+    TechnicalSpec[]
+  >([]);
 
   const [availableSpecs, setAvailableSpecs] = useState<SpecItem[]>([]);
   const [specsLoading, setSpecsLoading] = useState(false);
@@ -1363,6 +1370,19 @@ export default function AddNewProduct({
     setRegPrice(editData.regularPrice?.toString() || "");
     setPromoPrice(editData.promoPrice?.toString() || "");
     setStatus(editData.status || "draft");
+    setEditableTechnicalSpecs(
+      Array.isArray(editData.technicalSpecs)
+        ? editData.technicalSpecs.map((group: any) => ({
+            specGroup: typeof group?.specGroup === "string" ? group.specGroup : "",
+            specs: Array.isArray(group?.specs)
+              ? group.specs.map((spec: any) => ({
+                  name: typeof spec?.name === "string" ? spec.name : "",
+                  value: typeof spec?.value === "string" ? spec.value : "",
+                }))
+              : [],
+          }))
+        : [],
+    );
     setTdsUrl(editData.tdsFileUrl || "");
     setSelectedWebs(
       Array.isArray(editData.website)
@@ -1865,12 +1885,25 @@ export default function AddNewProduct({
         }
       });
 
-      const technicalSpecs = Object.entries(specsGrouped).map(
+      const catalogTechnicalSpecs = Object.entries(specsGrouped).map(
         ([specGroup, specs]) => ({
           specGroup: specGroup.toUpperCase().trim(),
           specs,
         }),
       );
+      const technicalSpecs = editData
+        ? editableTechnicalSpecs
+            .map((group) => ({
+              specGroup: group.specGroup.trim(),
+              specs: group.specs
+                .map((spec) => ({
+                  name: spec.name.trim(),
+                  value: spec.value.trim(),
+                }))
+                .filter((spec) => spec.name && spec.value),
+            }))
+            .filter((group) => group.specGroup && group.specs.length > 0)
+        : catalogTechnicalSpecs;
 
       const productFamilyTitle = selectedCatId
         ? availableCats.find((c) => c.id === selectedCatId)?.name || ""
@@ -2029,7 +2062,15 @@ export default function AddNewProduct({
       tabSpecs.resetSpecValues();
 
       // ── TDS generation ────────────────────────────────────────────────────
-      if (tdsHasSpecs && technicalSpecs.length > 0 && savedDocId) {
+      const mainImageChanged =
+        Boolean(editData) && mainUrl !== (editData?.mainImage || "");
+      const shouldRegenerateTdsForImage =
+        Boolean(editData?.tdsFileUrl) && mainImageChanged;
+      if (
+        (tdsHasSpecs || shouldRegenerateTdsForImage) &&
+        technicalSpecs.length > 0 &&
+        savedDocId
+      ) {
         try {
           toast.loading("Generating TDS PDF...", { id: tid });
           setTdsStatus("generating");
@@ -2926,6 +2967,193 @@ export default function AddNewProduct({
               </div>
             </CardContent>
           </Card>
+
+          {editData && (
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                <CardTitle className="flex items-center gap-2 text-sm font-medium">
+                  <Cpu className="h-4 w-4" />
+                  Technical Specifications
+                </CardTitle>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setEditableTechnicalSpecs((groups) => [
+                      ...groups,
+                      { specGroup: "", specs: [{ name: "", value: "" }] },
+                    ])
+                  }
+                  disabled={isPublishing}
+                >
+                  <Plus className="mr-1 h-4 w-4" />
+                  Add Group
+                </Button>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {editableTechnicalSpecs.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No technical specifications yet. Add a group to get started.
+                  </p>
+                ) : (
+                  editableTechnicalSpecs.map((group, groupIndex) => (
+                    <div
+                      key={groupIndex}
+                      className="space-y-3 rounded-lg border p-4"
+                    >
+                      <div className="flex items-end gap-2">
+                        <div className="flex-1 space-y-2">
+                          <Label>Group Title</Label>
+                          <Input
+                            value={group.specGroup}
+                            onChange={(event) =>
+                              setEditableTechnicalSpecs((groups) =>
+                                groups.map((item, index) =>
+                                  index === groupIndex
+                                    ? { ...item, specGroup: event.target.value }
+                                    : item,
+                                ),
+                              )
+                            }
+                            placeholder="e.g. LAMP DETAILS"
+                            disabled={isPublishing}
+                          />
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          aria-label={`Remove ${group.specGroup || "specification"} group`}
+                          onClick={() =>
+                            setEditableTechnicalSpecs((groups) =>
+                              groups.filter((_, index) => index !== groupIndex),
+                            )
+                          }
+                          disabled={isPublishing}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+
+                      {group.specs.map((spec, specIndex) => (
+                        <div
+                          key={specIndex}
+                          className="grid gap-3 md:grid-cols-[1fr_1fr_auto]"
+                        >
+                          <div className="space-y-2">
+                            <Label>Specification</Label>
+                            <Input
+                              value={spec.name}
+                              onChange={(event) =>
+                                setEditableTechnicalSpecs((groups) =>
+                                  groups.map((item, index) =>
+                                    index === groupIndex
+                                      ? {
+                                          ...item,
+                                          specs: item.specs.map(
+                                            (currentSpec, currentIndex) =>
+                                              currentIndex === specIndex
+                                                ? {
+                                                    ...currentSpec,
+                                                    name: event.target.value,
+                                                  }
+                                                : currentSpec,
+                                          ),
+                                        }
+                                      : item,
+                                  ),
+                                )
+                              }
+                              placeholder="e.g. LAMP POWER"
+                              disabled={isPublishing}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Value</Label>
+                            <Input
+                              value={spec.value}
+                              onChange={(event) =>
+                                setEditableTechnicalSpecs((groups) =>
+                                  groups.map((item, index) =>
+                                    index === groupIndex
+                                      ? {
+                                          ...item,
+                                          specs: item.specs.map(
+                                            (currentSpec, currentIndex) =>
+                                              currentIndex === specIndex
+                                                ? {
+                                                    ...currentSpec,
+                                                    value: event.target.value,
+                                                  }
+                                                : currentSpec,
+                                          ),
+                                        }
+                                      : item,
+                                  ),
+                                )
+                              }
+                              placeholder="e.g. 6 WATTS"
+                              disabled={isPublishing}
+                            />
+                          </div>
+                          <div className="flex items-end gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                setEditableTechnicalSpecs((groups) =>
+                                  groups.map((item, index) =>
+                                    index === groupIndex
+                                      ? {
+                                          ...item,
+                                          specs: [
+                                            ...item.specs,
+                                            { name: "", value: "" },
+                                          ],
+                                        }
+                                      : item,
+                                  ),
+                                )
+                              }
+                              disabled={isPublishing}
+                            >
+                              <Plus className="mr-1 h-4 w-4" />
+                              Row
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                setEditableTechnicalSpecs((groups) =>
+                                  groups.map((item, index) =>
+                                    index === groupIndex
+                                      ? {
+                                          ...item,
+                                          specs: item.specs.filter(
+                                            (_, index) => index !== specIndex,
+                                          ),
+                                        }
+                                      : item,
+                                  ),
+                                )
+                              }
+                              disabled={isPublishing}
+                            >
+                              <X className="mr-1 h-4 w-4" />
+                              Remove
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           {/* TDS file card */}
           {tdsUrl && (
