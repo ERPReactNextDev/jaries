@@ -265,8 +265,8 @@ export default function HomePopupManager() {
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
               {/* ── FORM PANEL ── */}
-              <div className="lg:col-span-4 sticky top-6 z-10">
-                <Card className="rounded-none shadow-none border-foreground/10 max-h-[calc(100vh-6rem)] overflow-y-auto">
+              <div className="sticky top-16 z-10 lg:col-span-4">
+                <Card className="max-h-[calc(100dvh-4rem)] overflow-y-auto rounded-none border-foreground/10 shadow-none">
                   <CardHeader className="border-b py-4 flex flex-row items-center justify-between space-y-0 sticky top-0 bg-background z-10">
                     <CardTitle className="text-xs font-bold uppercase tracking-widest">
                       {editingId ? "Edit Popup" : "New Popup"}

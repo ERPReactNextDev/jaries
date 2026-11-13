@@ -3650,6 +3650,7 @@ function FullAllProductsView() {
 
   const renderTableMode = () => (
     <div className="w-full space-y-4">
+      <div className="sticky top-16 z-30 -mx-4 space-y-3 border-b bg-background/95 px-4 py-3 shadow-sm backdrop-blur-md group-has-data-[collapsible=icon]/sidebar-wrapper:top-12 sm:mx-0">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h2 className="text-2xl font-semibold tracking-tight">
@@ -3672,7 +3673,7 @@ function FullAllProductsView() {
       </div>
 
       {selectedCount > 0 && (
-        <div className="fixed inset-x-2 bottom-[calc(env(safe-area-inset-bottom)+0.5rem)] z-50 flex max-h-[40dvh] flex-col gap-2 overflow-y-auto rounded-xl border border-destructive/30 bg-background/95 p-3 shadow-2xl backdrop-blur-md sm:static sm:max-h-none sm:flex-row sm:items-center sm:justify-between sm:overflow-visible sm:rounded-lg sm:bg-destructive/10 sm:p-4 sm:shadow-none sm:backdrop-blur-none">
+        <div className="flex flex-col gap-2 rounded-lg border border-destructive/20 bg-destructive/10 p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4">
           <div className="flex items-center justify-between gap-3 sm:justify-start">
             <div className="flex min-w-0 items-center gap-3">
             <div className="w-10 h-10 bg-destructive/20 rounded-full flex items-center justify-center">
@@ -3798,7 +3799,7 @@ function FullAllProductsView() {
 
       {/* Filters row */}
       {/* Filters row */}
-      <div className="sticky top-16 z-30 -mx-4 border-b bg-background/95 px-4 py-2 backdrop-blur-sm sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:p-0 sm:backdrop-blur-0">
+      <div className="border-t pt-2">
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           {/* Search + Actions (one row on mobile) */}
           <div className="flex w-full items-center gap-1.5 sm:contents">
@@ -4389,11 +4390,10 @@ function FullAllProductsView() {
           )}
         </div>
       )}
+      </div>
 
       {/* Mobile product cards */}
-      <div
-        className={`grid grid-cols-2 gap-3 pb-3 sm:grid-cols-3 lg:hidden ${selectedCount > 0 ? "pb-44" : ""}`}
-      >
+      <div className="grid grid-cols-2 gap-3 pb-3 sm:grid-cols-3 lg:hidden">
         {loading ? (
           <div className="col-span-full flex h-48 items-center justify-center rounded-lg border">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />

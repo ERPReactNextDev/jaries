@@ -316,7 +316,7 @@ export default function TaskflowProductsPage() {
   const renderTableMode = () => (
     <div className="space-y-4">
       {/* Toolbar */}
-      <div className="sticky top-16 z-30 -mx-4 border-b bg-background/95 px-4 py-2 backdrop-blur-sm sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:p-0 sm:backdrop-blur-0">
+      <div className="sticky top-16 z-30 -mx-4 border-b bg-background/95 px-4 py-2 backdrop-blur-sm group-has-data-[collapsible=icon]/sidebar-wrapper:top-12 sm:mx-0 sm:border-0 sm:bg-background/95 sm:px-0 sm:py-2">
       <div className="flex flex-wrap items-center gap-2 sm:gap-3">
         <div
           ref={searchContainerRef}

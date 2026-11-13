@@ -250,6 +250,14 @@
   background-clip: content-box;
 }
 
+ [data-slot="sidebar-inset"] > header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background-color: var(--background);
+  isolation: isolate;
+}
+
 @media (max-width: 639px) {
   [data-slot="sidebar-inset"] {
     min-width: 0;
@@ -258,14 +266,6 @@
 
   [data-slot="sidebar-inset"] > * {
     min-width: 0;
-  }
-
-  [data-slot="sidebar-inset"] > header {
-    position: sticky;
-    top: 0;
-    z-index: 40;
-    background-color: var(--background);
-    isolation: isolate;
   }
 
   [data-slot="table-container"],

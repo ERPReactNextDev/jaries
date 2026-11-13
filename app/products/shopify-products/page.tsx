@@ -308,7 +308,7 @@ export default function ShopifyProductsPage() {
   const renderTableMode = () => (
     <div className="space-y-4">
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+      <div className="sticky top-16 z-30 -mx-4 flex flex-wrap items-center gap-2 border-b bg-background/95 px-4 py-2 backdrop-blur-sm group-has-data-[collapsible=icon]/sidebar-wrapper:top-12 sm:mx-0 sm:gap-3 sm:border-0 sm:bg-background/95 sm:px-0 sm:py-2">
         <div className="relative w-full basis-full sm:w-auto sm:basis-auto sm:flex-1 sm:max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
