@@ -174,9 +174,9 @@ function TdsPreviewDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl w-full h-[90vh] flex flex-col p-0 gap-0">
-        <DialogHeader className="px-5 py-4 border-b shrink-0">
-          <div className="flex items-center gap-3">
+      <DialogContent className="flex h-[90dvh] max-h-[90dvh] w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] flex-col gap-0 overflow-hidden p-0 sm:w-[90vw] sm:max-w-[90vw] lg:max-w-6xl">
+        <DialogHeader className="shrink-0 border-b px-4 py-3 sm:px-5 sm:py-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <div className="w-9 h-9 rounded-lg bg-red-50 border border-red-200 flex items-center justify-center shrink-0">
               <FileText className="w-4 h-4 text-red-600" />
             </div>
@@ -189,7 +189,7 @@ function TdsPreviewDialog({
               </DialogDescription>
             </div>
             {tdsUrl && (
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex flex-wrap items-center justify-end gap-2 sm:ml-auto">
                 <a
                   href={tdsUrl}
                   target="_blank"
