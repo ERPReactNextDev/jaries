@@ -879,7 +879,7 @@ function TdsPreviewDialog({
             </div>
           </div>
         </DialogHeader>
-        <div className="flex-1 overflow-hidden bg-muted/30">
+        <div className="min-h-0 min-w-0 flex-1 overflow-hidden bg-muted/30">
           {generating ? (
             <div className="h-full flex flex-col items-center justify-center gap-4 text-muted-foreground p-8">
               <Loader2 className="w-16 h-16 text-muted-foreground/60 animate-spin" />
@@ -887,8 +887,8 @@ function TdsPreviewDialog({
             </div>
           ) : tdsUrl ? (
             <iframe
-              src={`${tdsUrl}#toolbar=1&navpanes=0`}
-              className="w-full h-full border-0"
+              src={`${tdsUrl}#toolbar=1&navpanes=0&view=FitH`}
+              className="block h-full w-full border-0"
               title={`${getPrimaryCode(product)} TDS`}
             />
           ) : (

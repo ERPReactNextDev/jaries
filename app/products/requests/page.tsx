@@ -286,6 +286,7 @@ export default function ProductRequestsPage() {
     "all",
   );
   const [page, setPage] = useState(0);
+  const [mobileVisibleCount, setMobileVisibleCount] = useState(12);
 
   // ── Bulk selection state ───────────────────────────────────────────────────
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -351,6 +352,7 @@ export default function ProductRequestsPage() {
   // Clear selection and reset page when filters change
   useEffect(() => {
     setPage(0);
+    setMobileVisibleCount(12);
     setSelectedIds(new Set());
   }, [statusFilter, search]);
 
@@ -488,6 +490,7 @@ export default function ProductRequestsPage() {
             </header>
 
             <div className="flex flex-1 flex-col gap-4 p-4 pt-0">
+              <div className="sticky top-16 z-30 -mx-4 space-y-3 border-b bg-background/95 px-4 py-3 shadow-sm backdrop-blur-md group-has-data-[collapsible=icon]/sidebar-wrapper:top-12 sm:mx-0">
               {/* Page title */}
               <div>
                 <div className="flex items-center gap-2 mb-1">
@@ -545,14 +548,14 @@ export default function ProductRequestsPage() {
 
               {/* ── Bulk actions bar (verifiers only, when items selected) ── */}
               {isVerifier && selectedIds.size > 0 && (
-                <div className="flex items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50/60 dark:bg-emerald-950/20 dark:border-emerald-800 px-4 py-2.5">
+                <div className="flex flex-col gap-2 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2.5 dark:border-emerald-800 dark:bg-emerald-950/20 sm:flex-row sm:items-center sm:justify-between sm:px-4">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-semibold text-emerald-800 dark:text-emerald-300">
                       {selectedIds.size} pending request
                       {selectedIds.size !== 1 ? "s" : ""} selected
                     </span>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center justify-end gap-2">
                     <Button
                       size="sm"
                       variant="ghost"
@@ -575,7 +578,7 @@ export default function ProductRequestsPage() {
 
               {/* Toolbar */}
               <div className="flex flex-wrap items-center gap-2">
-                <div className="relative flex-1 min-w-48 max-w-xs">
+                <div className="relative w-full min-w-0 flex-1 sm:w-auto sm:min-w-48 sm:max-w-xs">
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                   <Input
                     placeholder="Search by product name or code…"
@@ -600,13 +603,176 @@ export default function ProductRequestsPage() {
                     <SelectItem value="rejected">Rejected</SelectItem>
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-muted-foreground ml-auto">
+                <p className="ml-auto w-full text-right text-xs text-muted-foreground sm:w-auto">
                   {filtered.length} request{filtered.length !== 1 ? "s" : ""}
                 </p>
               </div>
+              </div>
 
-              {/* Table */}
-              <div className="border rounded-lg overflow-hidden">
+              {/* Mobile request cards */}
+              <div className="grid grid-cols-2 gap-3 lg:hidden">
+                {loading ? (
+                  <div className="col-span-full flex h-48 items-center justify-center rounded-lg border">
+                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                  </div>
+                ) : filtered.length > 0 ? (
+                  filtered.slice(0, mobileVisibleCount).map((req) => {
+                    const isPending = req.status === "pending";
+                    const canAct = isPending && isVerifier;
+                    const isSelected = selectedIds.has(req.id);
+                    const productName =
+                      (req.meta?.productName as string) ||
+                      req.resourceId ||
+                      "—";
+                    const itemCode =
+                      (req.meta?.litItemCode as string) ||
+                      (req.meta?.ecoItemCode as string) ||
+                      "—";
+
+                    return (
+                      <article
+                        key={req.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setPreview(req)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            setPreview(req);
+                          }
+                        }}
+                        className={cn(
+                          "relative flex min-w-0 flex-col gap-2 rounded-lg border bg-card p-3 text-left transition-colors hover:bg-muted/30",
+                          isSelected &&
+                            "border-emerald-500/50 bg-emerald-50/40 dark:bg-emerald-950/10",
+                        )}
+                      >
+                        {isVerifier && isPending && (
+                          <Checkbox
+                            checked={isSelected}
+                            onCheckedChange={() => toggleSelect(req.id)}
+                            onClick={(event) => event.stopPropagation()}
+                            aria-label={`Select request for ${productName}`}
+                            className="absolute right-2 top-2"
+                          />
+                        )}
+                        <div className="min-w-0 pr-7">
+                          <p className="line-clamp-2 min-h-9 text-xs font-semibold leading-snug">
+                            {productName}
+                          </p>
+                          <p className="mt-1 break-all font-mono text-[10px] text-muted-foreground">
+                            {itemCode}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <TypeBadge type={req.type} />
+                          <StatusBadge status={req.status} />
+                        </div>
+                        <div className="space-y-1 border-t pt-2 text-[10px] text-muted-foreground">
+                          {isVerifier && (
+                            <p className="truncate">
+                              <span className="font-medium text-foreground">
+                                By:
+                              </span>{" "}
+                              {req.requestedByName || req.requestedBy || "—"}
+                            </p>
+                          )}
+                          <p>
+                            <span className="font-medium text-foreground">
+                              Submitted:
+                            </span>{" "}
+                            {formatTs(req.createdAt)}
+                          </p>
+                          {isVerifier && req.reviewedByName && (
+                            <p className="truncate">
+                              <span className="font-medium text-foreground">
+                                Reviewed:
+                              </span>{" "}
+                              {req.reviewedByName}
+                            </p>
+                          )}
+                        </div>
+                        <div
+                          className="mt-auto flex flex-wrap items-center gap-1 border-t pt-2"
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-7 flex-1 gap-1 px-2 text-[10px]"
+                            onClick={() => setPreview(req)}
+                          >
+                            <Eye className="h-3 w-3" />
+                            View
+                          </Button>
+                          {canAct && (
+                            <>
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="outline"
+                                className="h-7 w-7 border-emerald-200 text-emerald-600 hover:bg-emerald-50"
+                                aria-label={`Approve ${productName}`}
+                                onClick={() =>
+                                  setRemarksTarget({
+                                    request: req,
+                                    action: "approve",
+                                  })
+                                }
+                              >
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="outline"
+                                className="h-7 w-7 border-rose-200 text-rose-600 hover:bg-rose-50"
+                                aria-label={`Reject ${productName}`}
+                                onClick={() =>
+                                  setRemarksTarget({
+                                    request: req,
+                                    action: "reject",
+                                  })
+                                }
+                              >
+                                <XCircle className="h-3.5 w-3.5" />
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </article>
+                    );
+                  })
+                ) : (
+                  <div className="col-span-full flex h-48 flex-col items-center justify-center gap-2 rounded-lg border text-muted-foreground">
+                    <Inbox className="h-8 w-8 opacity-30" />
+                    <span className="text-sm">No requests found</span>
+                  </div>
+                )}
+              </div>
+              {!loading && filtered.length > mobileVisibleCount && (
+                <div className="flex flex-col items-center gap-1 lg:hidden">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() =>
+                      setMobileVisibleCount((count) =>
+                        Math.min(count + 12, filtered.length),
+                      )
+                    }
+                  >
+                    Load more requests
+                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    Showing {Math.min(mobileVisibleCount, filtered.length)} of{" "}
+                    {filtered.length}
+                  </span>
+                </div>
+              )}
+
+              {/* Desktop table */}
+              <div className="hidden overflow-hidden rounded-lg border lg:block">
                 <Table>
                   <TableHeader>
                     <TableRow className="bg-muted/30">
@@ -835,7 +1001,7 @@ export default function ProductRequestsPage() {
 
               {/* Pagination */}
               {totalPages > 1 && (
-                <div className="flex items-center justify-between py-2">
+                <div className="hidden items-center justify-between py-2 lg:flex">
                   <p className="text-xs text-muted-foreground">
                     Page {page + 1} of {totalPages} · {filtered.length} total
                   </p>

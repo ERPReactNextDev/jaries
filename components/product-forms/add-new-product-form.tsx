@@ -222,11 +222,11 @@ function TdsPreviewDialog({
             )}
           </div>
         </DialogHeader>
-        <div className="flex-1 overflow-hidden bg-muted/30">
+        <div className="min-h-0 min-w-0 flex-1 overflow-hidden bg-muted/30">
           {tdsUrl ? (
             <iframe
-              src={`${tdsUrl}#toolbar=1&navpanes=0`}
-              className="w-full h-full border-0"
+              src={`${tdsUrl}#toolbar=1&navpanes=0&view=FitH`}
+              className="block h-full w-full border-0"
               title={`${primaryCode} TDS`}
             />
           ) : (
