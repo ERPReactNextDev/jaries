@@ -3672,8 +3672,9 @@ function FullAllProductsView() {
       </div>
 
       {selectedCount > 0 && (
-        <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+        <div className="fixed inset-x-2 bottom-[calc(env(safe-area-inset-bottom)+0.5rem)] z-50 flex max-h-[40dvh] flex-col gap-2 overflow-y-auto rounded-xl border border-destructive/30 bg-background/95 p-3 shadow-2xl backdrop-blur-md sm:static sm:max-h-none sm:flex-row sm:items-center sm:justify-between sm:overflow-visible sm:rounded-lg sm:bg-destructive/10 sm:p-4 sm:shadow-none sm:backdrop-blur-none">
+          <div className="flex items-center justify-between gap-3 sm:justify-start">
+            <div className="flex min-w-0 items-center gap-3">
             <div className="w-10 h-10 bg-destructive/20 rounded-full flex items-center justify-center">
               <span className="text-sm font-semibold text-destructive">
                 {selectedCount}
@@ -3688,12 +3689,21 @@ function FullAllProductsView() {
               </p>
             </div>
           </div>
-          <div className="flex gap-2 flex-wrap justify-end">
             <Button
               variant="ghost"
               size="sm"
               onClick={() => table.resetRowSelection()}
-              className="gap-2"
+              className="h-8 shrink-0 gap-1 px-2 text-xs sm:hidden"
+            >
+              <X className="h-3.5 w-3.5" /> Clear
+            </Button>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => table.resetRowSelection()}
+              className="hidden gap-2 sm:inline-flex"
             >
               <X className="h-4 w-4" /> Clear
             </Button>
@@ -3701,62 +3711,85 @@ function FullAllProductsView() {
               <Button
                 variant="outline"
                 size="sm"
-                className={`gap-2 ${isRequestMode ? "border-amber-300 text-amber-700 hover:bg-amber-50" : "border-primary/30 text-primary hover:bg-primary/5"}`}
+                className={`h-9 min-w-0 justify-start gap-1.5 px-2 text-[11px] sm:h-9 sm:w-auto sm:justify-center sm:gap-2 sm:px-3 sm:text-sm ${isRequestMode ? "border-amber-300 text-amber-700 hover:bg-amber-50" : "border-primary/30 text-primary hover:bg-primary/5"}`}
                 onClick={() => setAssignWebsiteOpen(true)}
               >
-                <Globe className="h-4 w-4" />{" "}
-                {isRequestMode ? "Request Website Assign" : "Assign to Website"}
+                <Globe className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
+                <span className="truncate sm:hidden">
+                  {isRequestMode ? "Request Website" : "Assign Website"}
+                </span>
+                <span className="hidden sm:inline">
+                  {isRequestMode ? "Request Website Assign" : "Assign to Website"}
+                </span>
               </Button>
             )}
             {userCanWrite && (
               <Button
                 variant="outline"
                 size="sm"
-                className={`gap-2 ${isRequestMode ? "border-amber-300 text-amber-700 hover:bg-amber-50" : "border-violet-300 text-violet-700 hover:bg-violet-50"}`}
+                className={`h-9 min-w-0 justify-start gap-1.5 px-2 text-[11px] sm:h-9 sm:w-auto sm:justify-center sm:gap-2 sm:px-3 sm:text-sm ${isRequestMode ? "border-amber-300 text-amber-700 hover:bg-amber-50" : "border-violet-300 text-violet-700 hover:bg-violet-50"}`}
                 onClick={() => setAssignProductClassOpen(true)}
               >
-                <Tag className="h-4 w-4" />{" "}
-                {isRequestMode ? "Request Class Change" : "Set Product Class"}
+                <Tag className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
+                <span className="truncate sm:hidden">
+                  {isRequestMode ? "Request Class" : "Set Class"}
+                </span>
+                <span className="hidden sm:inline">
+                  {isRequestMode ? "Request Class Change" : "Set Product Class"}
+                </span>
               </Button>
             )}
             <Button
               variant="outline"
               size="sm"
-              className="gap-2 border-orange-300 text-orange-700 hover:bg-orange-50"
+              className="h-9 min-w-0 justify-start gap-1.5 border-orange-300 px-2 text-[11px] text-orange-700 hover:bg-orange-50 sm:h-9 sm:w-auto sm:justify-center sm:gap-2 sm:px-3 sm:text-sm"
               onClick={handleOpenBulkTds}
             >
-              <FilePlus2 className="h-4 w-4" /> Generate TDS
+              <FilePlus2 className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
+              <span className="truncate">Generate TDS</span>
             </Button>
             <Button
               variant="outline"
               size="sm"
-              className="gap-2 border-sky-300 text-sky-700 hover:bg-sky-50"
+              className="h-9 min-w-0 justify-start gap-1.5 border-sky-300 px-2 text-[11px] text-sky-700 hover:bg-sky-50 sm:h-9 sm:w-auto sm:justify-center sm:gap-2 sm:px-3 sm:text-sm"
               disabled={isTdsDownloading}
               onClick={handleBulkDownloadTds}
             >
               {isTdsDownloading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin sm:h-4 sm:w-4" />
               ) : (
-                <Download className="h-4 w-4" />
+                <Download className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
               )}
-              {isTdsDownloading ? "Zipping…" : "Download TDS ZIP"}
+              <span className="truncate sm:hidden">
+                {isTdsDownloading ? "Zipping…" : "Download ZIP"}
+              </span>
+              <span className="hidden sm:inline">
+                {isTdsDownloading ? "Zipping…" : "Download TDS ZIP"}
+              </span>
             </Button>
             {userCanWrite && (
               <Button
                 variant={isRequestMode ? "outline" : "destructive"}
                 size="sm"
                 disabled={isDeleting}
-                className={`gap-2 ${isRequestMode ? "border-amber-300 text-amber-700 hover:bg-amber-50" : ""}`}
+                className={`h-9 min-w-0 justify-start gap-1.5 px-2 text-[11px] sm:h-9 sm:w-auto sm:justify-center sm:gap-2 sm:px-3 sm:text-sm ${isRequestMode ? "border-amber-300 text-amber-700 hover:bg-amber-50" : ""}`}
                 onClick={() => setBulkDeleteOpen(true)}
               >
                 {isDeleting ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin sm:h-4 sm:w-4" />
                 ) : (
-                  <Trash2 className="h-4 w-4" />
+                  <Trash2 className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
                 )}
-                {isRequestMode
-                  ? `Request Delete (${selectedCount})`
-                  : `Move ${selectedCount} to Bin`}
+                <span className="truncate sm:hidden">
+                  {isRequestMode
+                    ? `Request Delete (${selectedCount})`
+                    : `Move ${selectedCount} to Bin`}
+                </span>
+                <span className="hidden sm:inline">
+                  {isRequestMode
+                    ? `Request Delete (${selectedCount})`
+                    : `Move ${selectedCount} to Bin`}
+                </span>
               </Button>
             )}
           </div>
@@ -4358,7 +4391,9 @@ function FullAllProductsView() {
       )}
 
       {/* Mobile product cards */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:hidden">
+      <div
+        className={`grid grid-cols-2 gap-3 pb-3 sm:grid-cols-3 lg:hidden ${selectedCount > 0 ? "pb-44" : ""}`}
+      >
         {loading ? (
           <div className="col-span-full flex h-48 items-center justify-center rounded-lg border">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
