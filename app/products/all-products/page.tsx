@@ -3650,7 +3650,7 @@ function FullAllProductsView() {
 
   const renderTableMode = () => (
     <div className="w-full space-y-4">
-      <div className="sticky top-16 z-30 -mx-4 space-y-3 border-b bg-background/95 px-4 py-3 shadow-sm backdrop-blur-md group-has-data-[collapsible=icon]/sidebar-wrapper:top-12 sm:mx-0">
+      <div className="-mx-4 space-y-3 bg-background px-4 py-3 sm:mx-0">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h2 className="text-2xl font-semibold tracking-tight">
@@ -3797,9 +3797,11 @@ function FullAllProductsView() {
         </div>
       )}
 
+      </div>
+
       {/* Filters row */}
       {/* Filters row */}
-      <div className="border-t pt-2">
+      <div className="sticky top-16 z-30 -mx-4 border-t border-b bg-background/95 px-4 pb-3 pt-2 shadow-sm backdrop-blur-md group-has-data-[collapsible=icon]/sidebar-wrapper:top-12 sm:mx-0">
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           {/* Search + Actions (one row on mobile) */}
           <div className="flex w-full items-center gap-1.5 sm:contents">
@@ -4390,8 +4392,6 @@ function FullAllProductsView() {
           )}
         </div>
       )}
-      </div>
-
       {/* Mobile product cards */}
       <div className="grid grid-cols-2 gap-3 pb-3 sm:grid-cols-3 lg:hidden">
         {loading ? (
