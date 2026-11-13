@@ -48,6 +48,8 @@
 }
 
 :root {
+  --font-sans: "Verdana", "Segoe UI", sans-serif;
+  --font-mono: "Verdana", "Segoe UI", sans-serif;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -116,11 +118,193 @@
   --sidebar-ring: oklch(0.556 0 0);
 }
 
+.dark [class*="bg-emerald-"],
+.dark [class*="bg-green-"],
+.dark [class*="bg-violet-"],
+.dark [class*="bg-amber-"],
+.dark [class*="bg-rose-"],
+.dark [class*="bg-sky-"],
+.dark [class*="bg-cyan-"],
+.dark [class*="bg-yellow-"],
+.dark [class*="bg-lime-"],
+.dark [class*="bg-pink-"],
+.dark [class*="bg-indigo-"] {
+  filter: saturate(0.78) brightness(1.02);
+}
+
+.dark [class*="bg-emerald-"],
+.dark [class*="bg-green-"] {
+  background-color: rgb(34 197 94 / 0.20);
+}
+.dark [class*="bg-violet-"] {
+  background-color: rgb(139 92 246 / 0.16);
+}
+.dark [class*="bg-amber-"],
+.dark [class*="bg-yellow-"],
+.dark [class*="bg-lime-"] {
+  background-color: rgb(250 204 21 / 0.22);
+}
+.dark [class*="bg-rose-"] {
+  background-color: rgb(244 63 94 / 0.15);
+}
+.dark [class*="bg-sky-"] {
+  background-color: rgb(14 165 233 / 0.16);
+}
+.dark [class*="bg-cyan-"] {
+  background-color: rgb(6 182 212 / 0.24);
+}
+.dark [class*="bg-pink-"],
+.dark [class*="bg-indigo-"] {
+  background-color: rgb(168 85 247 / 0.12);
+}
+
+.dark [class*="text-emerald-"],
+.dark [class*="text-green-"],
+.dark [class*="text-violet-"],
+.dark [class*="text-amber-"],
+.dark [class*="text-rose-"],
+.dark [class*="text-sky-"],
+.dark [class*="text-yellow-"],
+.dark [class*="text-lime-"],
+.dark [class*="text-pink-"],
+.dark [class*="text-indigo-"] {
+  color: rgb(219 234 254 / 0.96);
+}
+
+.dark [class*="text-cyan-"] {
+  color: rgb(103 232 249 / 0.98);
+}
+
+.dark [class*="text-amber-"],
+.dark [class*="text-yellow-"],
+.dark [class*="text-lime-"] {
+  color: rgb(254 240 138 / 0.98);
+}
+
+.dark [class*="border-emerald-"],
+.dark [class*="border-green-"],
+.dark [class*="border-violet-"],
+.dark [class*="border-amber-"],
+.dark [class*="border-rose-"],
+.dark [class*="border-sky-"],
+.dark [class*="border-yellow-"],
+.dark [class*="border-lime-"],
+.dark [class*="border-pink-"],
+.dark [class*="border-indigo-"] {
+  border-color: rgb(148 163 184 / 0.3);
+}
+
+.dark [class*="border-cyan-"] {
+  border-color: rgb(34 211 238 / 0.55);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
+  html,
   body {
+    font-family: "Verdana", "Segoe UI", sans-serif;
     @apply bg-background text-foreground;
+  }
+
+  button,
+  [role="button"],
+  a,
+  input[type="button"],
+  input[type="submit"],
+  input[type="reset"],
+  select,
+  summary,
+  [data-slot="button"],
+  [data-slot="select-trigger"],
+  [data-slot="combo-box-trigger"],
+  [data-slot="combobox-trigger"],
+  [data-slot="dropdown-menu-trigger"],
+  [data-slot="popover-trigger"],
+  [data-slot="checkbox"],
+  .cursor-pointer,
+  .clickable {
+    cursor: pointer;
+  }
+}
+
+.editor-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--muted-foreground) 55%, transparent)
+    transparent;
+}
+
+.editor-scrollbar::-webkit-scrollbar {
+  width: 10px;
+}
+
+.editor-scrollbar::-webkit-scrollbar-thumb {
+  background-color: color-mix(
+    in oklch,
+    var(--muted-foreground) 55%,
+    transparent
+  );
+  border: 3px solid transparent;
+  border-radius: 9999px;
+  background-clip: content-box;
+}
+
+@media (max-width: 639px) {
+  [data-slot="sidebar-inset"] {
+    min-width: 0;
+    max-width: 100vw;
+  }
+
+  [data-slot="sidebar-inset"] > * {
+    min-width: 0;
+  }
+
+  [data-slot="sidebar-inset"] > header {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    background-color: var(--background);
+    isolation: isolate;
+  }
+
+  [data-slot="table-container"],
+  .overflow-x-auto {
+    max-width: 100%;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  [data-slot="table-container"] table,
+  .overflow-x-auto > table {
+    width: max-content;
+    min-width: 100%;
+  }
+
+  [data-slot="dialog-content"] {
+    width: calc(100vw - 1rem);
+    max-width: calc(100vw - 1rem);
+    max-height: calc(100dvh - 1rem);
+    overflow-y: auto;
+  }
+
+  [data-slot="sheet-content"] {
+    max-width: calc(100vw - 1rem);
+  }
+
+  [data-slot="popover-content"],
+  [data-slot="dropdown-menu-content"] {
+    max-width: calc(100vw - 1rem);
+    max-height: calc(100dvh - 1rem);
+    overflow-y: auto;
+  }
+
+  button,
+  [role="button"],
+  input[type="button"],
+  input[type="submit"],
+  input[type="reset"],
+  select {
+    touch-action: manipulation;
   }
 }

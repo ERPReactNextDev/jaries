@@ -3,9 +3,9 @@
 import * as React from "react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import Image from "next/image";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { BrandLogo } from "@/components/brand-logo";
 import {
   Card,
   CardContent,
@@ -78,8 +78,8 @@ export function OTPForm({
       <Card>
         <CardHeader className="text-center">
           <div className="flex justify-center pb-4">
-            <Image
-              src="/logo-full.png"
+            <BrandLogo
+              variant="full"
               alt="Company Logo"
               width={180}
               height={60}

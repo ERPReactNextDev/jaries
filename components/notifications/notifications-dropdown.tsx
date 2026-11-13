@@ -371,7 +371,7 @@ export function NotificationsDropdown() {
           >
             <Bell className="h-4 w-4" />
             {badgeCount > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 text-white text-[9px] font-bold px-1 leading-none">
+              <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 text-white text-[9px] font-bold px-1 leading-none">
                 {badgeCount > 99 ? "99+" : badgeCount}
               </span>
             )}

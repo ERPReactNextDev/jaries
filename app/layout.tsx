@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, JetBrains_Mono } from "next/font/google";
 import { Toaster } from "sonner";
+import { ThemeProvider } from "next-themes";
 import { AuthProvider } from "@/lib/useAuth";
 import { ReactQueryProvider } from "@/lib/react-query-provider";
 import ServiceWorkerRegister from "@/app/components/ServiceWorkerRegister";
@@ -46,8 +47,6 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
   themeColor: "#2563EB",
 };
 
@@ -59,6 +58,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
+      suppressHydrationWarning
       className={`${jetbrainsMono.variable} ${geistSans.variable} ${geistMono.variable} antialiased`}
     >
       <head>
@@ -71,7 +71,7 @@ export default function RootLayout({
       </head>
 
       <body
-        className="w-full flex flex-col"
+        className="w-full flex flex-col bg-background text-foreground"
         style={{
           minHeight: "100vh",
           touchAction: "manipulation",
@@ -81,12 +81,19 @@ export default function RootLayout({
         {/* Service Worker (cleaner than inline script) */}
         <ServiceWorkerRegister />
 
-        <ReactQueryProvider>
-          <AuthProvider>{children}</AuthProvider>
-        </ReactQueryProvider>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="dark"
+          enableSystem
+          disableTransitionOnChange
+        >
+          <ReactQueryProvider>
+            <AuthProvider>{children}</AuthProvider>
+          </ReactQueryProvider>
 
-        {/* Toasts */}
-        <Toaster position="top-right" richColors />
+          {/* Toasts */}
+          <Toaster position="top-right" richColors />
+        </ThemeProvider>
       </body>
     </html>
   );

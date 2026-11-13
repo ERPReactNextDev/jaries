@@ -119,6 +119,7 @@ export default function ShopifyProductsPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [rowsPerPageInput, setRowsPerPageInput] = useState("10");
+  const [mobileVisibleCount, setMobileVisibleCount] = useState(12);
 
   const [isEditing, setIsEditing] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
@@ -166,6 +167,7 @@ export default function ShopifyProductsPage() {
 
   useEffect(() => {
     setCurrentPage(1);
+    setMobileVisibleCount(12);
   }, [searchQuery, brandFilter]);
 
   const shopifyTotal = useMemo(
@@ -211,7 +213,7 @@ export default function ShopifyProductsPage() {
   };
 
   const handleBulkSoftDelete = async () => {
-    const targets = paginatedProducts.filter((p) => selectedIds.has(p.id));
+    const targets = filteredProducts.filter((p) => selectedIds.has(p.id));
     const t = toast.loading(
       `Submitting delete for ${targets.length} products…`,
     );
@@ -306,8 +308,8 @@ export default function ShopifyProductsPage() {
   const renderTableMode = () => (
     <div className="space-y-4">
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 max-w-sm">
+      <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+        <div className="relative w-full basis-full sm:w-auto sm:basis-auto sm:flex-1 sm:max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Search products…"
@@ -373,7 +375,136 @@ export default function ShopifyProductsPage() {
       </p>
 
       {/* Table */}
-      <div className="border rounded-lg overflow-hidden">
+      {/* Mobile product cards */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:hidden">
+        {loading ? (
+          <div className="col-span-full flex h-48 items-center justify-center rounded-lg border">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          </div>
+        ) : filteredProducts.length > 0 ? (
+          filteredProducts.slice(0, mobileVisibleCount).map((product) => {
+            const pendingStatus = pendingMap.get(product.id) ?? null;
+            const isPendingDelete = pendingStatus === "delete";
+            const busy = !!pendingStatus;
+            const brands = Array.isArray(product.brands)
+              ? product.brands.join(", ")
+              : product.brand || "Generic";
+            const websites = Array.isArray(product.websites)
+              ? product.websites.join(", ")
+              : Array.isArray(product.website)
+                ? product.website.join(", ")
+                : product.websites || product.website || "N/A";
+
+            return (
+              <article
+                key={product.id}
+                className={`flex min-w-0 flex-col overflow-hidden rounded-lg border bg-card ${isPendingDelete ? "opacity-60" : ""}`}
+              >
+                <div className="relative flex h-28 items-center justify-center border-b bg-muted/30 p-2">
+                  <Checkbox
+                    checked={selectedIds.has(product.id)}
+                    onCheckedChange={() => toggleSelect(product.id)}
+                    aria-label={`Select ${product.name || "product"}`}
+                    className="absolute left-2 top-2 z-10 bg-background"
+                  />
+                  {product.mainImage ? (
+                    <img
+                      src={product.mainImage}
+                      alt={product.name || ""}
+                      className="h-full w-full object-contain"
+                    />
+                  ) : (
+                    <Package className="h-10 w-10 text-muted-foreground/40" />
+                  )}
+                  {pendingStatus && (
+                    <span className="absolute right-2 top-2">
+                      <PendingRowIndicator status={pendingStatus} />
+                    </span>
+                  )}
+                </div>
+                <div className="flex min-w-0 flex-1 flex-col gap-2 p-2.5">
+                  <button
+                    type="button"
+                    onClick={() => !busy && handleEditClick(product)}
+                    className="line-clamp-2 min-h-10 text-left text-xs font-semibold leading-snug hover:text-primary"
+                    title={product.name || ""}
+                  >
+                    {product.name || "Untitled product"}
+                  </button>
+                  <p className="break-all font-mono text-[11px] text-muted-foreground">
+                    {product.itemCode || "—"}
+                  </p>
+                  <div className="flex min-w-0 flex-col items-start gap-1">
+                    <Badge
+                      variant="outline"
+                      className="max-w-full truncate text-[10px]"
+                    >
+                      {brands}
+                    </Badge>
+                    <Badge
+                      variant="secondary"
+                      className="max-w-full truncate text-[10px]"
+                    >
+                      {websites}
+                    </Badge>
+                  </div>
+                  <div className="mt-auto flex items-center justify-end gap-1 border-t pt-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      aria-label={`Edit ${product.name || "product"}`}
+                      onClick={() => handleEditClick(product)}
+                      disabled={isPendingDelete}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-destructive hover:bg-destructive/10"
+                      aria-label={`Delete ${product.name || "product"}`}
+                      onClick={() => setDeleteTarget(product)}
+                      disabled={busy}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              </article>
+            );
+          })
+        ) : (
+          <div className="col-span-full flex h-48 flex-col items-center justify-center gap-2 rounded-lg border text-muted-foreground">
+            <Package className="h-8 w-8 opacity-30" />
+            <p className="text-sm">No products found</p>
+          </div>
+        )}
+      </div>
+      {!loading && filteredProducts.length > mobileVisibleCount && (
+        <div className="flex flex-col items-center gap-1 lg:hidden">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() =>
+              setMobileVisibleCount((count) =>
+                Math.min(count + 12, filteredProducts.length),
+              )
+            }
+          >
+            Load more products
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            Showing {Math.min(mobileVisibleCount, filteredProducts.length)} of{" "}
+            {filteredProducts.length}
+          </span>
+        </div>
+      )}
+
+      {/* Desktop table */}
+      <div className="hidden overflow-hidden rounded-lg border lg:block">
         <Table>
           <TableHeader>
             <TableRow>
@@ -526,7 +657,7 @@ export default function ShopifyProductsPage() {
 
       {/* Pagination */}
       {!loading && totalPages > 0 && (
-        <div className="flex justify-between items-center">
+        <div className="hidden items-center justify-between lg:flex">
           <div className="flex items-center gap-2">
             <span className="text-sm text-muted-foreground">
               Rows per page:

@@ -1,8 +1,8 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useState, useEffect } from "react";
-import Image from "next/image";
 
 import { NavMain } from "@/components/sidebar/nav-main";
 import { NavUser } from "@/components/sidebar/nav-user";
@@ -28,6 +28,7 @@ import { auth, db } from "@/lib/firebase";
 import { doc, getDoc } from "@/lib/firestore/client";
 import { onAuthStateChanged } from "firebase/auth";
 import { canAccessRoute } from "@/lib/roleAccess";
+import { BrandLogo } from "@/components/brand-logo";
 
 // ─── All navigation items ─────────────────────────────────────────────────────
 
@@ -252,29 +253,43 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     <Sidebar collapsible="icon" {...props}>
       <SidebarHeader>
         <div className="flex h-16 items-center justify-center">
-          {isCollapsed ? (
-            <div className="flex items-center justify-center w-full">
-              <Image
-                src="/logo-small.png"
-                alt="JarIS CMS Icon"
-                width={44}
-                height={44}
-                className="object-contain"
-                priority
-              />
-            </div>
-          ) : (
-            <div className="flex w-full items-center px-4">
-              <Image
-                src="/logo-full.png"
-                alt="JarIS CMS Logo"
-                width={160}
-                height={40}
-                className="object-contain"
-                priority
-              />
-            </div>
-          )}
+          <Link
+            href="/products/all-products"
+            className="flex w-full items-center justify-center transition-opacity hover:opacity-90"
+            aria-label="Go to all products"
+            onClick={() => {
+              try {
+                window.localStorage.removeItem("all-products:edit-session");
+              } catch (error) {
+                console.error("Failed to clear product edit session:", error);
+              }
+              window.dispatchEvent(new Event("jaries:show-products-inventory"));
+            }}
+          >
+            {isCollapsed ? (
+              <div className="flex items-center justify-center w-full">
+                <BrandLogo
+                  variant="small"
+                  alt="JarIS CMS Icon"
+                  width={44}
+                  height={44}
+                  className="object-contain"
+                  priority
+                />
+              </div>
+            ) : (
+              <div className="flex w-full items-center px-4">
+                <BrandLogo
+                  variant="full"
+                  alt="JarIS CMS Logo"
+                  width={160}
+                  height={40}
+                  className="object-contain"
+                  priority
+                />
+              </div>
+            )}
+          </Link>
         </div>
       </SidebarHeader>
 

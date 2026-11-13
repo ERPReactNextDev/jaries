@@ -779,6 +779,34 @@ interface SpecValue {
   specs: { name: string; value: string }[];
 }
 
+function parseTechnicalSpecs(value: unknown): TechnicalSpec[] {
+  if (!Array.isArray(value)) return [];
+
+  return value.flatMap((group): TechnicalSpec[] => {
+    if (!group || typeof group !== "object") return [];
+    const candidate = group as Record<string, unknown>;
+    if (
+      typeof candidate.specGroup !== "string" ||
+      !Array.isArray(candidate.specs)
+    ) {
+      return [];
+    }
+
+    const specs = candidate.specs.flatMap((spec) => {
+      if (!spec || typeof spec !== "object") return [];
+      const entry = spec as Record<string, unknown>;
+      return [
+        {
+          name: typeof entry.name === "string" ? entry.name : "",
+          value: typeof entry.value === "string" ? entry.value : "",
+        },
+      ];
+    });
+
+    return [{ specGroup: candidate.specGroup, specs }];
+  });
+}
+
 interface PendingNewSpec {
   specGroupId: string;
   specGroup: string;
@@ -1370,19 +1398,7 @@ export default function AddNewProduct({
     setRegPrice(editData.regularPrice?.toString() || "");
     setPromoPrice(editData.promoPrice?.toString() || "");
     setStatus(editData.status || "draft");
-    setEditableTechnicalSpecs(
-      Array.isArray(editData.technicalSpecs)
-        ? editData.technicalSpecs.map((group: any) => ({
-            specGroup: typeof group?.specGroup === "string" ? group.specGroup : "",
-            specs: Array.isArray(group?.specs)
-              ? group.specs.map((spec: any) => ({
-                  name: typeof spec?.name === "string" ? spec.name : "",
-                  value: typeof spec?.value === "string" ? spec.value : "",
-                }))
-              : [],
-          }))
-        : [],
-    );
+    setEditableTechnicalSpecs(parseTechnicalSpecs(editData.technicalSpecs));
     setTdsUrl(editData.tdsFileUrl || "");
     setSelectedWebs(
       Array.isArray(editData.website)
@@ -1891,19 +1907,43 @@ export default function AddNewProduct({
           specs,
         }),
       );
-      const technicalSpecs = editData
-        ? editableTechnicalSpecs
-            .map((group) => ({
-              specGroup: group.specGroup.trim(),
-              specs: group.specs
-                .map((spec) => ({
-                  name: spec.name.trim(),
-                  value: spec.value.trim(),
-                }))
-                .filter((spec) => spec.name && spec.value),
+      const manualTechnicalSpecs = editableTechnicalSpecs
+        .map((group) => ({
+          specGroup: group.specGroup.trim(),
+          specs: group.specs
+            .map((spec) => ({
+              name: spec.name.trim(),
+              value: spec.value.trim(),
             }))
-            .filter((group) => group.specGroup && group.specs.length > 0)
-        : catalogTechnicalSpecs;
+            .filter((spec) => spec.name && spec.value),
+        }))
+        .filter((group) => group.specGroup && group.specs.length > 0);
+      const technicalSpecs = editData
+        ? manualTechnicalSpecs
+        : catalogTechnicalSpecs.reduce(
+            (groups, catalogGroup) => {
+              const manualGroup = manualTechnicalSpecs.find(
+                (group) =>
+                  group.specGroup.toUpperCase() ===
+                  catalogGroup.specGroup.toUpperCase(),
+              );
+              groups.push({
+                ...catalogGroup,
+                specs: manualGroup
+                  ? [...catalogGroup.specs, ...manualGroup.specs]
+                  : catalogGroup.specs,
+              });
+              return groups;
+            },
+            manualTechnicalSpecs.filter(
+              (manualGroup) =>
+                !catalogTechnicalSpecs.some(
+                  (catalogGroup) =>
+                    catalogGroup.specGroup.toUpperCase() ===
+                    manualGroup.specGroup.toUpperCase(),
+                ),
+            ),
+          );
 
       const productFamilyTitle = selectedCatId
         ? availableCats.find((c) => c.id === selectedCatId)?.name || ""
@@ -2066,8 +2106,12 @@ export default function AddNewProduct({
         Boolean(editData) && mainUrl !== (editData?.mainImage || "");
       const shouldRegenerateTdsForImage =
         Boolean(editData?.tdsFileUrl) && mainImageChanged;
+      const hasManualSpecsForNewProduct =
+        !editData && manualTechnicalSpecs.length > 0;
       if (
-        (tdsHasSpecs || shouldRegenerateTdsForImage) &&
+        (tdsHasSpecs ||
+          hasManualSpecsForNewProduct ||
+          shouldRegenerateTdsForImage) &&
         technicalSpecs.length > 0 &&
         savedDocId
       ) {
@@ -2362,9 +2406,9 @@ export default function AddNewProduct({
         onConfirm={handleAddSpecGroup}
       />
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 p-6 min-h-screen">
+      <div className="grid grid-cols-1 gap-4 p-3 sm:gap-6 sm:p-6 lg:h-[calc(100dvh-7rem)] lg:min-h-0 lg:grid-cols-3 lg:overflow-hidden">
         {/* ══ MAIN COLUMN ══════════════════════════════════════════════════ */}
-        <div className="md:col-span-2 space-y-6">
+        <div className="editor-scrollbar space-y-6 lg:col-span-2 lg:min-h-0 lg:overflow-y-auto lg:overscroll-auto lg:pr-2">
           {tdsHasSpecs && (
             <Card className="border-emerald-200 dark:border-emerald-800/50 bg-emerald-50/50 dark:bg-emerald-950/20">
               <CardContent className="pt-6">
@@ -2598,7 +2642,7 @@ export default function AddNewProduct({
                   </button>
                   {techDrawingsOpen && (
                     <div className="space-y-4 mt-3">
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 min-[480px]:grid-cols-2 gap-4">
                         {renderSimpleDropzone({
                           rootProps: dimensionalDrawingRoot,
                           inputProps: dimensionalDrawingInput,
@@ -2624,7 +2668,7 @@ export default function AddNewProduct({
                           label: "Mounting Height",
                         })}
                       </div>
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 min-[480px]:grid-cols-2 gap-4">
                         {renderSimpleDropzone({
                           rootProps: driverCompRoot,
                           inputProps: driverCompInput,
@@ -2650,7 +2694,7 @@ export default function AddNewProduct({
                           label: "Base",
                         })}
                       </div>
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 min-[480px]:grid-cols-2 gap-4">
                         {renderSimpleDropzone({
                           rootProps: illumRoot,
                           inputProps: illumInput,
@@ -2676,7 +2720,7 @@ export default function AddNewProduct({
                           label: "Wiring Diagram",
                         })}
                       </div>
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 min-[480px]:grid-cols-2 gap-4">
                         {renderSimpleDropzone({
                           rootProps: installRoot,
                           inputProps: installInput,
@@ -2702,7 +2746,7 @@ export default function AddNewProduct({
                           label: "Wiring Layout",
                         })}
                       </div>
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 min-[480px]:grid-cols-2 gap-4">
                         {renderSimpleDropzone({
                           rootProps: termLayRoot,
                           inputProps: termLayInput,
@@ -2728,7 +2772,7 @@ export default function AddNewProduct({
                           label: "Accessories",
                         })}
                       </div>
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 min-[480px]:grid-cols-2 gap-4">
                         {renderSimpleDropzone({
                           rootProps: typeOfPlugRoot,
                           inputProps: typeOfPlugInput,
@@ -2879,98 +2923,11 @@ export default function AddNewProduct({
                 />
               </div>
 
-              {/* ── UPDATED: Technical Specs via SpecsTabContainer ─────────── */}
-              {selectedCatId && (
-                <div className="pt-4 border-t">
-                  <SpecsTabContainer
-                    itemCodes={itemCodes}
-                    availableSpecs={availableSpecs}
-                    specsLoading={specsLoading}
-                    unified={tabSpecs.unified}
-                    onToggleUnified={tabSpecs.setUnified}
-                    activeTab={tabSpecs.activeTab}
-                    onSetActiveTab={tabSpecs.setActiveTab}
-                    getSpecValues={(brand) =>
-                      brand === null
-                        ? tabSpecs.sharedSpecValues
-                        : (tabSpecs.brandSpecValues[brand] ?? {})
-                    }
-                    onSpecValueChange={(key, value, brand) => {
-                      if (brand === null) {
-                        tabSpecs.setUnified(true);
-                      }
-                      tabSpecs.setSpecValue(key, value);
-                    }}
-                    pendingNewSpecs={pendingNewSpecs}
-                    onAddNewSpecItem={(specGroupId, specGroup, brand) =>
-                      addNewSpecItem(specGroupId, specGroup)
-                    }
-                    newSpecInputs={newSpecInputs}
-                    onNewSpecInputChange={(specGroupId, value) =>
-                      setNewSpecInputs((p) => ({ ...p, [specGroupId]: value }))
-                    }
-                    onRemovePendingSpec={(tempId) =>
-                      setPendingNewSpecs((p) =>
-                        p.filter((s) => s.tempId !== tempId),
-                      )
-                    }
-                    groupNameEdits={groupNameEdits}
-                    onGroupNameChange={(specGroupId, name) =>
-                      setGroupNameEdits((p) => ({
-                        ...p,
-                        [specGroupId]: name,
-                      }))
-                    }
-                    onSaveGroupRename={saveGroupRename}
-                    editingGroupId={editingGroupId}
-                    onSetEditingGroupId={setEditingGroupId}
-                    onOpenAddSpecGroup={() => setAddSpecGroupOpen(true)}
-                  />
-                </div>
-              )}
             </CardContent>
           </Card>
 
-          {/* Product Status */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-sm font-medium">
-                <Eye className="h-4 w-4" />
-                Product Status
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 gap-3">
-                {STATUS_OPTIONS.map((opt) => {
-                  const active = status === opt.value;
-                  return (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => setStatus(opt.value)}
-                      className={`flex items-center gap-3 rounded-lg border-2 px-4 py-3 text-left transition-all ${active ? `${opt.activeBg} ${opt.color} border-current font-semibold` : "border-border hover:border-muted-foreground/30 hover:bg-muted/40 text-muted-foreground"}`}
-                    >
-                      <span
-                        className={active ? opt.color : "text-muted-foreground"}
-                      >
-                        {opt.icon}
-                      </span>
-                      <div>
-                        <p className="text-sm font-semibold">{opt.label}</p>
-                        <p className="text-[11px] font-normal opacity-70">
-                          {opt.desc}
-                        </p>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </CardContent>
-          </Card>
-
-          {editData && (
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0">
+          <Card className="lg:flex lg:max-h-[calc(100dvh-12rem)] lg:flex-col lg:overflow-hidden">
+              <CardHeader className="sticky top-0 z-10 flex shrink-0 flex-row items-center justify-between space-y-0 bg-card">
                 <CardTitle className="flex items-center gap-2 text-sm font-medium">
                   <Cpu className="h-4 w-4" />
                   Technical Specifications
@@ -2991,13 +2948,15 @@ export default function AddNewProduct({
                   Add Group
                 </Button>
               </CardHeader>
-              <CardContent className="space-y-4">
-                {editableTechnicalSpecs.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    No technical specifications yet. Add a group to get started.
-                  </p>
-                ) : (
-                  editableTechnicalSpecs.map((group, groupIndex) => (
+              <CardContent className="editor-scrollbar lg:[direction:rtl] lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:overscroll-auto">
+                <div className="space-y-4 md:[direction:ltr]">
+                  {editableTechnicalSpecs.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      No technical specifications yet. Add a group to get
+                      started.
+                    </p>
+                  ) : (
+                    editableTechnicalSpecs.map((group, groupIndex) => (
                     <div
                       key={groupIndex}
                       className="space-y-3 rounded-lg border p-4"
@@ -3149,11 +3108,48 @@ export default function AddNewProduct({
                         </div>
                       ))}
                     </div>
-                  ))
-                )}
+                    ))
+                  )}
+                </div>
               </CardContent>
             </Card>
-          )}
+
+          {/* Product Status */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-sm font-medium">
+                <Eye className="h-4 w-4" />
+                Product Status
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 gap-3">
+                {STATUS_OPTIONS.map((opt) => {
+                  const active = status === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setStatus(opt.value)}
+                      className={`flex items-center gap-3 rounded-lg border-2 px-4 py-3 text-left transition-all ${active ? `${opt.activeBg} ${opt.color} border-current font-semibold` : "border-border hover:border-muted-foreground/30 hover:bg-muted/40 text-muted-foreground"}`}
+                    >
+                      <span
+                        className={active ? opt.color : "text-muted-foreground"}
+                      >
+                        {opt.icon}
+                      </span>
+                      <div>
+                        <p className="text-sm font-semibold">{opt.label}</p>
+                        <p className="text-[11px] font-normal opacity-70">
+                          {opt.desc}
+                        </p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
 
           {/* TDS file card */}
           {tdsUrl && (
@@ -3195,7 +3191,7 @@ export default function AddNewProduct({
         </div>
 
         {/* ══ SIDEBAR ══════════════════════════════════════════════════════ */}
-        <div className="space-y-6">
+        <div className="space-y-6 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:pr-2">
           {/* Usage & Product Family */}
           <Card className="border-primary/20 bg-primary/2">
             <CardHeader className="pb-3">

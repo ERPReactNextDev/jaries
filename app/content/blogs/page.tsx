@@ -204,13 +204,13 @@ export default function BlogManager() {
   const renderTableMode = () => (
     <>
       {/* Filter bar */}
-      <div className="bg-white border border-foreground/10 px-6 py-4 flex items-center gap-4">
+      <div className="bg-white border border-foreground/10 px-3 py-3 sm:px-6 sm:py-4 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3 sm:flex sm:gap-4">
         <Filter size={14} className="opacity-30 shrink-0" />
         <span className="text-[10px] font-bold uppercase tracking-widest opacity-40 shrink-0">
           Filter by Website
         </span>
         <Select value={websiteFilter} onValueChange={setWebsiteFilter}>
-          <SelectTrigger className="h-8 w-56 rounded-none border-foreground/10 text-[10px] font-bold uppercase focus:ring-1 focus:ring-[#d11a2a]">
+          <SelectTrigger className="col-span-2 h-8 w-full rounded-none border-foreground/10 text-[10px] font-bold uppercase focus:ring-1 focus:ring-[#d11a2a] sm:col-span-1 sm:w-56">
             <SelectValue />
           </SelectTrigger>
           <SelectContent className="rounded-none">
@@ -233,7 +233,7 @@ export default function BlogManager() {
         )}
         <Button
           onClick={handleCreateNew}
-          className="ml-auto h-8 rounded-none bg-black hover:bg-[#d11a2a] text-[10px] font-bold uppercase tracking-widest px-6 transition-all"
+          className="col-span-2 ml-0 h-9 w-full rounded-none bg-black px-6 text-[10px] font-bold uppercase tracking-widest transition-all hover:bg-[#d11a2a] sm:col-span-1 sm:ml-auto sm:h-8 sm:w-auto"
         >
           <Plus className="mr-2 h-3.5 w-3.5" /> New Story
         </Button>

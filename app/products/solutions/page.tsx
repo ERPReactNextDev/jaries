@@ -93,6 +93,7 @@ export default function SolutionsManager() {
   const [loading, setLoading] = useState(true);
   const [isSubmitLoading, setIsSubmitLoading] = useState(false);
   const [openSeries, setOpenSeries] = useState(false);
+  const [mobileTab, setMobileTab] = useState<"form" | "solutions">("form");
 
   // Form States
   const [editId, setEditId] = useState<string | null>(null);
@@ -233,6 +234,7 @@ export default function SolutionsManager() {
         toast.success("Solution & SEO Saved");
       }
       resetForm();
+      setMobileTab("solutions");
     } catch (error) {
       toast.error("Process failed");
     } finally {
@@ -271,13 +273,61 @@ export default function SolutionsManager() {
               </p>
             </div>
 
+            <div
+              role="tablist"
+              aria-label="Solutions sections"
+              className="sticky top-16 z-30 grid grid-cols-2 gap-2 bg-background/95 py-2 backdrop-blur-sm lg:hidden"
+            >
+              <button
+                type="button"
+                role="tab"
+                id="solutions-form-tab"
+                aria-selected={mobileTab === "form"}
+                aria-controls="solutions-form-panel"
+                onClick={() => setMobileTab("form")}
+                className={cn(
+                  "min-h-11 border px-3 text-xs font-bold uppercase tracking-wide",
+                  mobileTab === "form"
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-border bg-card text-muted-foreground",
+                )}
+              >
+                {editId ? "Edit Solution" : "Add Solution"}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                id="solutions-list-tab"
+                aria-selected={mobileTab === "solutions"}
+                aria-controls="solutions-list-panel"
+                onClick={() => setMobileTab("solutions")}
+                className={cn(
+                  "min-h-11 border px-3 text-xs font-bold uppercase tracking-wide",
+                  mobileTab === "solutions"
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-border bg-card text-muted-foreground",
+                )}
+              >
+                Solutions ({solutions.length})
+              </button>
+            </div>
+
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
               {/* ── FORM SECTION (sticky) ── */}
-              <div className="lg:col-span-4 sticky top-6 z-10">
-                <div className="space-y-6 max-h-[calc(100vh-6rem)] overflow-y-auto pr-1">
+              <div
+                id="solutions-form-panel"
+                role="tabpanel"
+                aria-labelledby="solutions-form-tab"
+                className={cn(
+                  "lg:col-span-4 lg:sticky lg:top-6 lg:z-10",
+                  mobileTab === "form" ? "block" : "hidden",
+                  "lg:block",
+                )}
+              >
+                <div className="space-y-6 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto lg:pr-1">
                   {/* Core Content card */}
                   <Card className="rounded-none shadow-none border-foreground/10">
-                    <CardHeader className="border-b py-4 flex flex-row items-center justify-between space-y-0 bg-muted/30 sticky top-0 z-10">
+                    <CardHeader className="border-b py-4 flex flex-row items-center justify-between space-y-0 bg-muted/30 lg:sticky lg:top-0 lg:z-10">
                       <CardTitle className="text-[10px] font-bold uppercase tracking-widest flex items-center gap-2">
                         <Settings2 className="h-3 w-3" /> Core Content
                       </CardTitle>
@@ -538,7 +588,16 @@ export default function SolutionsManager() {
               </div>
 
               {/* ── LIST VIEW (RIGHT) ── */}
-              <div className="lg:col-span-8">
+              <div
+                id="solutions-list-panel"
+                role="tabpanel"
+                aria-labelledby="solutions-list-tab"
+                className={cn(
+                  "lg:col-span-8",
+                  mobileTab === "solutions" ? "block" : "hidden",
+                  "lg:block",
+                )}
+              >
                 {loading ? (
                   <div className="flex justify-center py-20">
                     <Loader2 className="animate-spin text-primary" />
@@ -572,6 +631,7 @@ export default function SolutionsManager() {
                                 setSlug(sol.slug || "");
                                 setMetaTitle(sol.metaTitle || "");
                                 setMetaDescription(sol.metaDescription || "");
+                                setMobileTab("form");
                                 window.scrollTo({ top: 0, behavior: "smooth" });
                               }}
                             >

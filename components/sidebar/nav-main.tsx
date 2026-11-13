@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link"; // MUST use this
 import { usePathname } from "next/navigation";
 import { ChevronRightIcon } from "lucide-react";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 import {
   Collapsible,
@@ -37,7 +38,10 @@ export function NavMain({ items }: { items: any[] }) {
 
   return (
     <SidebarGroup>
-      <SidebarGroupLabel>CMS</SidebarGroupLabel>
+      <div className="flex items-center pr-2">
+        <SidebarGroupLabel className="flex-1">CMS</SidebarGroupLabel>
+        <ThemeToggle className="h-7 w-7" />
+      </div>
       <SidebarMenu>
         {items.map((item) => {
           const isOpen = openSection === item.title;

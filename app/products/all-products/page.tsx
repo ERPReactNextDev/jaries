@@ -176,6 +176,29 @@ const CLOUDINARY_CLOUD_NAME =
   process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME ?? "dvmpn8mjh";
 const CLOUDINARY_UPLOAD_PRESET =
   process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET ?? "taskflow_preset";
+const PRODUCT_EDIT_SESSION_KEY = "all-products:edit-session";
+const PRODUCT_EDIT_SESSION_TTL_MS = 5 * 60 * 1000;
+
+function saveProductEditSession(productId: string) {
+  try {
+    window.localStorage.setItem(
+      PRODUCT_EDIT_SESSION_KEY,
+      JSON.stringify({ productId, closedAt: Date.now() }),
+    );
+  } catch (error) {
+    console.error("Failed to save product edit session:", error);
+    toast.error("Unable to save the current product editor session.");
+  }
+}
+
+function clearProductEditSession() {
+  try {
+    window.localStorage.removeItem(PRODUCT_EDIT_SESSION_KEY);
+  } catch (error) {
+    console.error("Failed to clear product edit session:", error);
+    toast.error("Unable to clear the saved product editor session.");
+  }
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -2352,6 +2375,7 @@ function FullAllProductsView() {
   const [loading, setLoading] = React.useState(true);
 
   const [isEditing, setIsEditing] = React.useState(false);
+  const [isRestoringEdit, setIsRestoringEdit] = React.useState(true);
   const [selectedProduct, setSelectedProduct] = React.useState<Product | null>(
     null,
   );
@@ -2380,6 +2404,7 @@ function FullAllProductsView() {
     ("spf" | "standard" | "non-standard" | "usl")[]
   >([]);
   const [rowsPerPageInput, setRowsPerPageInput] = React.useState("10");
+  const [mobileVisibleCount, setMobileVisibleCount] = React.useState(12);
 
   const [showSuggestions, setShowSuggestions] = React.useState(false);
   const searchContainerRef = React.useRef<HTMLDivElement>(null);
@@ -2434,6 +2459,108 @@ function FullAllProductsView() {
     void fetchAll();
     return () => { cancelled = true; };
   }, [fetchProducts]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+
+    const showProductsInventory = () => {
+      cancelled = true;
+      clearProductEditSession();
+      setSelectedProduct(null);
+      setIsEditing(false);
+      setIsRestoringEdit(false);
+    };
+
+    window.addEventListener(
+      "jaries:show-products-inventory",
+      showProductsInventory,
+    );
+
+    const restoreProductEdit = async () => {
+      try {
+        const storedSession = window.localStorage.getItem(
+          PRODUCT_EDIT_SESSION_KEY,
+        );
+        if (!storedSession) return;
+
+        let parsedSession: unknown;
+        try {
+          parsedSession = JSON.parse(storedSession);
+        } catch {
+          clearProductEditSession();
+          return;
+        }
+
+        if (!parsedSession || typeof parsedSession !== "object") {
+          clearProductEditSession();
+          return;
+        }
+
+        const session = parsedSession as {
+          productId?: unknown;
+          closedAt?: unknown;
+        };
+        if (
+          typeof session.productId !== "string" ||
+          typeof session.closedAt !== "number"
+        ) {
+          clearProductEditSession();
+          return;
+        }
+
+        const sessionAge = Date.now() - session.closedAt;
+        if (sessionAge < 0 || sessionAge >= PRODUCT_EDIT_SESSION_TTL_MS) {
+          clearProductEditSession();
+          return;
+        }
+
+        const product = await fetchProductById(session.productId);
+        if (cancelled) return;
+        if (!product) {
+          clearProductEditSession();
+          return;
+        }
+
+        setSelectedProduct(product as Product);
+        setIsEditing(true);
+      } catch (error) {
+        if (!cancelled) {
+          console.error("Failed to restore product edit session:", error);
+          toast.error("Failed to restore the product editor.");
+        }
+      } finally {
+        if (!cancelled) setIsRestoringEdit(false);
+      }
+    };
+
+    void restoreProductEdit();
+    return () => {
+      cancelled = true;
+      window.removeEventListener(
+        "jaries:show-products-inventory",
+        showProductsInventory,
+      );
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (!isEditing || !selectedProduct?.id) return;
+
+    const saveClosedAt = () => {
+      try {
+        window.localStorage.setItem(
+          PRODUCT_EDIT_SESSION_KEY,
+          JSON.stringify({ productId: selectedProduct.id, closedAt: Date.now() }),
+        );
+      } catch (error) {
+        console.error("Failed to save product editor close time:", error);
+        toast.error("Unable to save the product editor session.");
+      }
+    };
+
+    window.addEventListener("pagehide", saveClosedAt);
+    return () => window.removeEventListener("pagehide", saveClosedAt);
+  }, [isEditing, selectedProduct?.id]);
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -2988,6 +3115,7 @@ function FullAllProductsView() {
       toast.error("Product no longer exists.");
       return;
     }
+    saveProductEditSession(full.id);
     setSelectedProduct(full as Product);
     setIsEditing(true);
   };
@@ -3476,6 +3604,7 @@ function FullAllProductsView() {
 
   const selectedCount = Object.keys(rowSelection).length;
   const totalCount = filteredData.length;
+  const mobileRows = table.getPrePaginationRowModel().rows;
   const isFiltered =
     Boolean(globalFilter.trim()) ||
     Boolean(familyFilter) ||
@@ -3483,12 +3612,17 @@ function FullAllProductsView() {
     classFilters.length > 0 ||
     sortOption === "recent-12h";
 
+  React.useEffect(() => {
+    setMobileVisibleCount(12);
+  }, [globalFilter, usageFilter, familyFilter, classFilters, sortOption]);
+
   const renderEditMode = () => (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
         <Button
           variant="ghost"
           onClick={() => {
+            clearProductEditSession();
             setSelectedProduct(null);
             setIsEditing(false);
           }}
@@ -3506,6 +3640,7 @@ function FullAllProductsView() {
       <AddNewProduct
         editData={selectedProduct}
         onFinished={() => {
+          clearProductEditSession();
           setSelectedProduct(null);
           setIsEditing(false);
         }}
@@ -3515,7 +3650,7 @@ function FullAllProductsView() {
 
   const renderTableMode = () => (
     <div className="w-full space-y-4">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h2 className="text-2xl font-semibold tracking-tight">
             Product Inventory
@@ -3533,27 +3668,6 @@ function FullAllProductsView() {
               </>
             )}
           </p>
-        </div>
-        <div className="flex gap-3">
-          <Button
-            variant="outline"
-            onClick={() => setBulkDownloadTdsOpen(true)}
-            className="gap-2 border-sky-300 text-sky-700 hover:bg-sky-50"
-          >
-            <Download className="h-4 w-4" /> Bulk Download TDS
-          </Button>
-          <BulkUploader onUploadComplete={() => {}} />
-          {userCanWrite && (
-            <Button
-              onClick={() => {
-                setSelectedProduct(null);
-                setIsEditing(true);
-              }}
-              className="gap-2"
-            >
-              <PlusCircle className="h-4 w-4" /> Add Product
-            </Button>
-          )}
         </div>
       </div>
 
@@ -3650,463 +3764,513 @@ function FullAllProductsView() {
       )}
 
       {/* Filters row */}
-      <div className="flex flex-wrap gap-3 items-center">
-        <div ref={searchContainerRef} className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground h-4 w-4 z-10" />
-          <Input
-            placeholder="Search by name, any item code…"
-            value={globalFilter ?? ""}
-            onChange={(e) => {
-              setGlobalFilter(e.target.value);
-              setShowSuggestions(true);
-            }}
-            onFocus={() => setShowSuggestions(true)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") setShowSuggestions(false);
-            }}
-            className="pl-9 pr-20"
-          />
-          <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
-            {globalFilter && (
+      {/* Filters row */}
+      <div className="sticky top-16 z-30 -mx-4 border-b bg-background/95 px-4 py-2 backdrop-blur-sm sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:p-0 sm:backdrop-blur-0">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          {/* Search + Actions (one row on mobile) */}
+          <div className="flex w-full items-center gap-1.5 sm:contents">
+          <div
+            ref={searchContainerRef}
+            className="relative min-w-0 flex-1 sm:w-auto sm:flex-1 sm:max-w-sm"
+          >
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground h-4 w-4 z-10" />
+            <Input
+              placeholder="Search by name, any item code…"
+              value={globalFilter ?? ""}
+              onChange={(e) => {
+                setGlobalFilter(e.target.value);
+                setShowSuggestions(true);
+              }}
+              onFocus={() => setShowSuggestions(true)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setShowSuggestions(false);
+              }}
+              className="pl-9 pr-20"
+            />
+            <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+              {globalFilter && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setGlobalFilter("")}
+                  className="h-6 w-6"
+                  title="Clear search"
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              )}
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
-                onClick={() => setGlobalFilter("")}
+                onClick={() => {
+                  setShowSuggestions(false);
+                  handleRefresh();
+                }}
+                disabled={isRefreshing}
                 className="h-6 w-6"
-                title="Clear search"
+                title="Refresh products"
               >
-                <X className="h-3 w-3" />
+                {isRefreshing ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-3 w-3" />
+                )}
               </Button>
-            )}
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              onClick={() => {
-                setShowSuggestions(false);
-                handleRefresh();
-              }}
-              disabled={isRefreshing}
-              className="h-6 w-6"
-              title="Refresh products"
-            >
-              {isRefreshing ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                <RefreshCw className="h-3 w-3" />
-              )}
-            </Button>
-          </div>
-          {showSuggestions && suggestions.length > 0 && (
-            <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-popover border rounded-lg shadow-lg overflow-hidden">
-              {suggestions.map((product) => {
-                const brands = Array.isArray(product.brands)
-                  ? product.brands
-                  : [product.brand || "Generic"];
-                const codes = resolveItemCodes(product);
-                return (
-                  <button
-                    key={product.id}
-                    type="button"
-                    className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-accent transition-colors"
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      setShowSuggestions(false);
-                      setGlobalFilter("");
-                      handleEdit(product);
-                    }}
-                  >
-                    <div className="w-9 h-9 shrink-0 bg-muted rounded-md border overflow-hidden flex items-center justify-center">
-                      {product.mainImage ? (
-                        <img
-                          src={product.mainImage}
-                          alt=""
-                          className="w-full h-full object-contain"
-                        />
-                      ) : (
-                        <Package className="h-4 w-4 text-muted-foreground/40" />
-                      )}
-                    </div>
-                    <div className="flex flex-col min-w-0 flex-1">
-                      <span className="text-sm font-medium truncate">
-                        {product.itemDescription || product.name}
-                      </span>
-                      <div className="mt-0.5">
-                        <ItemCodesDisplay
-                          itemCodes={codes}
-                          size="sm"
-                          maxVisible={2}
-                        />
-                      </div>
-                    </div>
-                    <Badge
-                      variant="outline"
-                      className="ml-auto shrink-0 text-xs"
-                    >
-                      {brands[0]}
-                    </Badge>
-                  </button>
-                );
-              })}
             </div>
-          )}
-        </div>
+            {showSuggestions && suggestions.length > 0 && (
+              <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-popover border rounded-lg shadow-lg overflow-hidden">
+                {suggestions.map((product) => {
+                  const brands = Array.isArray(product.brands)
+                    ? product.brands
+                    : [product.brand || "Generic"];
+                  const codes = resolveItemCodes(product);
+                  return (
+                    <button
+                      key={product.id}
+                      type="button"
+                      className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-accent transition-colors"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        setShowSuggestions(false);
+                        setGlobalFilter("");
+                        handleEdit(product);
+                      }}
+                    >
+                      <div className="w-9 h-9 shrink-0 bg-muted rounded-md border overflow-hidden flex items-center justify-center">
+                        {product.mainImage ? (
+                          <img
+                            src={product.mainImage}
+                            alt=""
+                            className="w-full h-full object-contain"
+                          />
+                        ) : (
+                          <Package className="h-4 w-4 text-muted-foreground/40" />
+                        )}
+                      </div>
+                      <div className="flex flex-col min-w-0 flex-1">
+                        <span className="text-sm font-medium truncate">
+                          {product.itemDescription || product.name}
+                        </span>
+                        <div className="mt-0.5">
+                          <ItemCodesDisplay
+                            itemCodes={codes}
+                            size="sm"
+                            maxVisible={2}
+                          />
+                        </div>
+                      </div>
+                      <Badge
+                        variant="outline"
+                        className="ml-auto shrink-0 text-xs"
+                      >
+                        {brands[0]}
+                      </Badge>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
 
-        {/* Product Class filter */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
+          {/* Actions: icon-only on mobile, labeled on desktop */}
+          <div className="flex shrink-0 items-center gap-1.5 sm:order-last sm:gap-3">
             <Button
               variant="outline"
-              className={`gap-2 ${activeClassFilter.length > 0 ? "border-primary text-primary bg-primary/5" : ""}`}
+              aria-label="Bulk Download TDS"
+              title="Bulk Download TDS"
+              onClick={() => setBulkDownloadTdsOpen(true)}
+              className="h-8 w-8 gap-0 border-sky-300 p-0 text-sky-700 hover:bg-sky-50 sm:h-10 sm:w-auto sm:gap-2 sm:px-4"
             >
-              <Tag className="h-4 w-4" />
-              {activeClassFilter.length === 0
-                ? "Product Class"
-                : activeClassFilter.length === 1
-                  ? PRODUCT_CLASS_OPTIONS.find(
-                      (o) => o.value === activeClassFilter[0],
-                    )?.label
-                  : `${activeClassFilter.length} Classes`}
-              <ChevronDown className="h-4 w-4" />
+              <Download className="h-4 w-4 shrink-0" />
+              <span className="hidden sm:inline">Bulk Download TDS</span>
             </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-60">
-            <DropdownMenuItem
-              onClick={() => setClassFilters([])}
-              className="flex items-center justify-between"
-            >
-              <span>All Classes</span>
-              <div className="flex items-center gap-1.5">
-                <CountPill count={data.length} />
-                {activeClassFilter.length === 0 && (
-                  <Check className="h-3.5 w-3.5 text-primary" />
-                )}
-              </div>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            {PRODUCT_CLASS_OPTIONS.map((option) => {
-              const isSelected = activeClassFilter.includes(option.value);
-              return (
+
+            <div className="max-sm:[&_button]:h-8 max-sm:[&_button]:w-8 max-sm:[&_button]:gap-0 max-sm:[&_button]:p-0 max-sm:[&_button]:text-[0px]">
+              <BulkUploader onUploadComplete={() => {}} />
+            </div>
+
+            {userCanWrite && (
+              <Button
+                aria-label="Add Product"
+                title="Add Product"
+                onClick={() => {
+                  clearProductEditSession();
+                  setSelectedProduct(null);
+                  setIsEditing(true);
+                }}
+                className="h-8 w-8 gap-0 p-0 sm:h-10 sm:w-auto sm:gap-2 sm:px-4"
+              >
+                <PlusCircle className="h-4 w-4 shrink-0" />
+                <span className="hidden sm:inline">Add Product</span>
+              </Button>
+            )}
+          </div>
+          </div>
+
+          {/* Single row on mobile: Class | Usage | Family | Sort */}
+          <div className="flex w-full flex-nowrap items-center gap-1.5 sm:contents">
+            {/* Product Class filter */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  className={`h-8 min-w-0 flex-1 gap-1 px-2 text-[11px] sm:h-10 sm:flex-none sm:gap-2 sm:px-4 sm:text-sm ${activeClassFilter.length > 0 ? "border-primary text-primary bg-primary/5" : ""}`}
+                >
+                  <Tag className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
+                  <span className="truncate">
+                    {activeClassFilter.length === 0
+                      ? "Class"
+                      : activeClassFilter.length === 1
+                        ? PRODUCT_CLASS_OPTIONS.find(
+                            (o) => o.value === activeClassFilter[0],
+                          )?.label
+                        : `${activeClassFilter.length}`}
+                  </span>
+                  <ChevronDown className="h-3 w-3 shrink-0 sm:h-4 sm:w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-60">
                 <DropdownMenuItem
-                  key={option.value}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    const next = isSelected
-                      ? activeClassFilter.filter((v) => v !== option.value)
-                      : [...activeClassFilter, option.value];
-                    setClassFilters(next);
-                  }}
+                  onClick={() => setClassFilters([])}
                   className="flex items-center justify-between"
                 >
-                  <span className="flex items-center gap-2">
-                    {React.isValidElement(option.icon)
-                      ? React.cloneElement(
-                          option.icon as React.ReactElement<any>,
-                          {
-                            className: "w-3.5 h-3.5",
-                          },
-                        )
-                      : null}{" "}
-                    {option.label}
-                  </span>
+                  <span>All Classes</span>
                   <div className="flex items-center gap-1.5">
-                    <CountPill
-                      count={productClassCounts.get(option.value) ?? 0}
-                      variant={
-                        option.value === "spf"
-                          ? "violet"
-                          : option.value === "non-standard"
-                            ? "amber"
-                            : option.value === "usl"
-                              ? "rose"
-                              : "default"
-                      }
-                    />
-                    {isSelected && (
+                    <CountPill count={data.length} />
+                    {activeClassFilter.length === 0 && (
                       <Check className="h-3.5 w-3.5 text-primary" />
                     )}
                   </div>
                 </DropdownMenuItem>
-              );
-            })}
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        {/* Product Usage filter */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="outline"
-              className={`gap-2 ${activeUsageFilter ? "border-primary text-primary bg-primary/5" : ""}`}
-            >
-              {activeUsageFilter === "OUTDOOR" ? (
-                <Trees className="h-4 w-4 text-emerald-600" />
-              ) : activeUsageFilter === "INDOOR" ? (
-                <Home className="h-4 w-4 text-sky-600" />
-              ) : activeUsageFilter === "SOLAR" ? (
-                <Sun className="h-4 w-4 text-amber-500" />
-              ) : (
-                <Sun className="h-4 w-4" />
-              )}
-              {activeUsageFilter
-                ? activeUsageFilter.charAt(0).toUpperCase() +
-                  activeUsageFilter.slice(1).toLowerCase()
-                : "Usage"}
-              <ChevronDown className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuItem
-              onClick={() => setUsageFilter("")}
-              className="flex items-center justify-between"
-            >
-              <span>All Usage</span>
-              <div className="flex items-center gap-1.5">
-                <CountPill count={data.length} />
-                {!activeUsageFilter && (
-                  <Check className="h-3.5 w-3.5 text-primary" />
-                )}
-              </div>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            {[
-              {
-                key: "OUTDOOR",
-                icon: <Trees className="w-3.5 h-3.5 text-emerald-600" />,
-                label: "Outdoor",
-                variant: "green" as const,
-              },
-              {
-                key: "INDOOR",
-                icon: <Home className="w-3.5 h-3.5 text-sky-600" />,
-                label: "Indoor",
-                variant: "sky" as const,
-              },
-              {
-                key: "SOLAR",
-                icon: <Sun className="w-3.5 h-3.5 text-amber-500" />,
-                label: "Solar",
-                variant: "amber" as const,
-              },
-            ].map(({ key, icon, label, variant }) => (
-              <DropdownMenuItem
-                key={key}
-                onClick={() =>
-                  setUsageFilter(activeUsageFilter === key ? "" : key)
-                }
-                className="flex items-center justify-between"
-              >
-                <span className="flex items-center gap-2">
-                  {icon} {label}
-                </span>
-                <div className="flex items-center gap-1.5">
-                  <CountPill
-                    count={productUsageCounts.get(key) ?? 0}
-                    variant={variant}
-                  />
-                  {activeUsageFilter === key && (
-                    <Check className="h-3.5 w-3.5 text-primary" />
-                  )}
-                </div>
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        {/* Product Family filter */}
-        <DropdownMenu
-          onOpenChange={(open) => {
-            if (!open) setFamilySearch("");
-          }}
-        >
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="outline"
-              className={`gap-2 ${activeFamilyFilter ? "border-primary text-primary bg-primary/5" : ""}`}
-            >
-              <Layers className="h-4 w-4" />
-              {activeFamilyFilter ? (
-                <span className="max-w-36 truncate">{activeFamilyFilter}</span>
-              ) : (
-                "Product Family"
-              )}
-              <ChevronDown className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="end"
-            className="w-72 p-0 overflow-x-hidden"
-          >
-            <div className="flex items-center gap-2 px-3 py-2 border-b">
-              <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-              <input
-                placeholder="Search families…"
-                value={familySearch}
-                onChange={(e) => setFamilySearch(e.target.value)}
-                onKeyDown={(e) => e.stopPropagation()}
-                className="flex-1 text-sm bg-transparent outline-none placeholder:text-muted-foreground/60 min-w-0"
-                autoFocus
-              />
-              {familySearch && (
-                <button
-                  type="button"
-                  onClick={() => setFamilySearch("")}
-                  className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
-            <div className="max-h-64 overflow-y-auto overflow-x-hidden py-1">
-              <DropdownMenuItem
-                onClick={() => setFamilyFilter("")}
-                className="flex items-center justify-between"
-              >
-                <span className="text-muted-foreground italic">
-                  All Families
-                </span>
-                <div className="flex items-center gap-1.5">
-                  <CountPill count={data.length} />
-                  {!activeFamilyFilter && (
-                    <Check className="h-3.5 w-3.5 text-primary" />
-                  )}
-                </div>
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              {(() => {
-                const filtered = uniqueProductFamilies.filter((f) =>
-                  f.toLowerCase().includes(familySearch.toLowerCase()),
-                );
-                if (filtered.length === 0)
+                <DropdownMenuSeparator />
+                {PRODUCT_CLASS_OPTIONS.map((option) => {
+                  const isSelected = activeClassFilter.includes(option.value);
                   return (
-                    <div className="px-3 py-4 text-center text-xs text-muted-foreground">
-                      No families match "{familySearch}"
-                    </div>
+                    <DropdownMenuItem
+                      key={option.value}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        const next = isSelected
+                          ? activeClassFilter.filter((v) => v !== option.value)
+                          : [...activeClassFilter, option.value];
+                        setClassFilters(next);
+                      }}
+                      className="flex items-center justify-between"
+                    >
+                      <span className="flex items-center gap-2">
+                        {React.isValidElement(option.icon)
+                          ? React.cloneElement(
+                              option.icon as React.ReactElement<any>,
+                              { className: "w-3.5 h-3.5" },
+                            )
+                          : null}{" "}
+                        {option.label}
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <CountPill
+                          count={productClassCounts.get(option.value) ?? 0}
+                          variant={
+                            option.value === "spf"
+                              ? "violet"
+                              : option.value === "non-standard"
+                                ? "amber"
+                                : option.value === "usl"
+                                  ? "rose"
+                                  : "default"
+                          }
+                        />
+                        {isSelected && (
+                          <Check className="h-3.5 w-3.5 text-primary" />
+                        )}
+                      </div>
+                    </DropdownMenuItem>
                   );
-                return filtered.map((family) => (
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Product Usage filter */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  className={`h-8 min-w-0 flex-1 gap-1 px-2 text-[11px] sm:h-10 sm:flex-none sm:gap-2 sm:px-4 sm:text-sm ${activeUsageFilter ? "border-primary text-primary bg-primary/5" : ""}`}
+                >
+                  {activeUsageFilter === "OUTDOOR" ? (
+                    <Trees className="h-3.5 w-3.5 shrink-0 text-emerald-600 sm:h-4 sm:w-4" />
+                  ) : activeUsageFilter === "INDOOR" ? (
+                    <Home className="h-3.5 w-3.5 shrink-0 text-sky-600 sm:h-4 sm:w-4" />
+                  ) : activeUsageFilter === "SOLAR" ? (
+                    <Sun className="h-3.5 w-3.5 shrink-0 text-amber-500 sm:h-4 sm:w-4" />
+                  ) : (
+                    <Sun className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
+                  )}
+                  <span className="truncate">
+                    {activeUsageFilter
+                      ? activeUsageFilter.charAt(0).toUpperCase() +
+                        activeUsageFilter.slice(1).toLowerCase()
+                      : "Usage"}
+                  </span>
+                  <ChevronDown className="h-3 w-3 shrink-0 sm:h-4 sm:w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuItem
+                  onClick={() => setUsageFilter("")}
+                  className="flex items-center justify-between"
+                >
+                  <span>All Usage</span>
+                  <div className="flex items-center gap-1.5">
+                    <CountPill count={data.length} />
+                    {!activeUsageFilter && (
+                      <Check className="h-3.5 w-3.5 text-primary" />
+                    )}
+                  </div>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                {[
+                  {
+                    key: "OUTDOOR",
+                    icon: <Trees className="w-3.5 h-3.5 text-emerald-600" />,
+                    label: "Outdoor",
+                    variant: "green" as const,
+                  },
+                  {
+                    key: "INDOOR",
+                    icon: <Home className="w-3.5 h-3.5 text-sky-600" />,
+                    label: "Indoor",
+                    variant: "sky" as const,
+                  },
+                  {
+                    key: "SOLAR",
+                    icon: <Sun className="w-3.5 h-3.5 text-amber-500" />,
+                    label: "Solar",
+                    variant: "amber" as const,
+                  },
+                ].map(({ key, icon, label, variant }) => (
                   <DropdownMenuItem
-                    key={family}
+                    key={key}
                     onClick={() =>
-                      setFamilyFilter(
-                        activeFamilyFilter === family ? "" : family,
-                      )
+                      setUsageFilter(activeUsageFilter === key ? "" : key)
                     }
-                    className="flex items-center gap-2 w-full overflow-hidden"
+                    className="flex items-center justify-between"
                   >
-                    <span className="truncate text-sm flex-1 min-w-0">
-                      {family}
+                    <span className="flex items-center gap-2">
+                      {icon} {label}
                     </span>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <CountPill count={productFamilyCounts.get(family) ?? 0} />
-                      {activeFamilyFilter === family && (
+                    <div className="flex items-center gap-1.5">
+                      <CountPill
+                        count={productUsageCounts.get(key) ?? 0}
+                        variant={variant}
+                      />
+                      {activeUsageFilter === key && (
                         <Check className="h-3.5 w-3.5 text-primary" />
                       )}
                     </div>
                   </DropdownMenuItem>
-                ));
-              })()}
-            </div>
-          </DropdownMenuContent>
-        </DropdownMenu>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
 
-        {/* Sort / Column toggle */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="outline"
-              size="icon"
-              className={`ml-auto transition-colors ${sortOption ? "border-primary text-primary bg-primary/5" : ""}`}
+            {/* Product Family filter */}
+            <DropdownMenu
+              onOpenChange={(open) => {
+                if (!open) setFamilySearch("");
+              }}
             >
-              <SlidersHorizontal className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
-            <DropdownMenuLabel className="flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Sort
-              </span>
-              {sortOption && (
-                <button
-                  type="button"
-                  onClick={() => setSortOption(null)}
-                  className="text-[10px] text-primary hover:underline font-medium"
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  className={`h-8 min-w-0 flex-1 gap-1 px-2 text-[11px] sm:h-10 sm:flex-none sm:gap-2 sm:px-4 sm:text-sm ${activeFamilyFilter ? "border-primary text-primary bg-primary/5" : ""}`}
                 >
-                  Reset
-                </button>
-              )}
-            </DropdownMenuLabel>
-            {[
-              {
-                key: "alpha-asc" as const,
-                icon: (
-                  <ArrowUpAZ className="h-3.5 w-3.5 mr-2 text-muted-foreground shrink-0" />
-                ),
-                label: "Alphabetically A → Z",
-              },
-              {
-                key: "alpha-desc" as const,
-                icon: (
-                  <ArrowDownAZ className="h-3.5 w-3.5 mr-2 text-muted-foreground shrink-0" />
-                ),
-                label: "Alphabetically Z → A",
-              },
-              {
-                key: "recent-12h" as const,
-                icon: (
-                  <Clock className="h-3.5 w-3.5 mr-2 text-muted-foreground shrink-0" />
-                ),
-                label: "Recently Added (12h)",
-              },
-              {
-                key: "newest" as const,
-                icon: (
-                  <ArrowDown className="h-3.5 w-3.5 mr-2 text-muted-foreground shrink-0" />
-                ),
-                label: "Newest to Oldest",
-              },
-              {
-                key: "oldest" as const,
-                icon: (
-                  <ArrowUp className="h-3.5 w-3.5 mr-2 text-muted-foreground shrink-0" />
-                ),
-                label: "Oldest to Newest",
-              },
-            ].map(({ key, icon, label }) => (
-              <DropdownMenuCheckboxItem
-                key={key}
-                checked={
-                  sortOption === key ||
-                  (key === "newest" && sortOption === null)
-                }
-                onCheckedChange={() =>
-                  setSortOption((s) => (s === key ? null : key))
-                }
+                  <Layers className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
+                  <span className="truncate sm:max-w-36">
+                    {activeFamilyFilter || "Family"}
+                  </span>
+                  <ChevronDown className="h-3 w-3 shrink-0 sm:h-4 sm:w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="w-72 p-0 overflow-x-hidden"
               >
-                {icon}
-                {label}
-              </DropdownMenuCheckboxItem>
-            ))}
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Toggle Columns
-            </DropdownMenuLabel>
-            {table
-              .getAllColumns()
-              .filter((c) => c.getCanHide())
-              .filter((c) => c.id !== "productFamilyFilter")
-              .map((column) => (
-                <DropdownMenuCheckboxItem
-                  key={column.id}
-                  className="capitalize"
-                  checked={column.getIsVisible()}
-                  onCheckedChange={(value) => column.toggleVisibility(!!value)}
+                <div className="flex items-center gap-2 px-3 py-2 border-b">
+                  <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  <input
+                    placeholder="Search families…"
+                    value={familySearch}
+                    onChange={(e) => setFamilySearch(e.target.value)}
+                    onKeyDown={(e) => e.stopPropagation()}
+                    className="flex-1 text-sm bg-transparent outline-none placeholder:text-muted-foreground/60 min-w-0"
+                    autoFocus
+                  />
+                  {familySearch && (
+                    <button
+                      type="button"
+                      onClick={() => setFamilySearch("")}
+                      className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+                <div className="max-h-64 overflow-y-auto overflow-x-hidden py-1">
+                  <DropdownMenuItem
+                    onClick={() => setFamilyFilter("")}
+                    className="flex items-center justify-between"
+                  >
+                    <span className="text-muted-foreground italic">
+                      All Families
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <CountPill count={data.length} />
+                      {!activeFamilyFilter && (
+                        <Check className="h-3.5 w-3.5 text-primary" />
+                      )}
+                    </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  {(() => {
+                    const filtered = uniqueProductFamilies.filter((f) =>
+                      f.toLowerCase().includes(familySearch.toLowerCase()),
+                    );
+                    if (filtered.length === 0)
+                      return (
+                        <div className="px-3 py-4 text-center text-xs text-muted-foreground">
+                          No families match "{familySearch}"
+                        </div>
+                      );
+                    return filtered.map((family) => (
+                      <DropdownMenuItem
+                        key={family}
+                        onClick={() =>
+                          setFamilyFilter(
+                            activeFamilyFilter === family ? "" : family,
+                          )
+                        }
+                        className="flex items-center gap-2 w-full overflow-hidden"
+                      >
+                        <span className="truncate text-sm flex-1 min-w-0">
+                          {family}
+                        </span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <CountPill
+                            count={productFamilyCounts.get(family) ?? 0}
+                          />
+                          {activeFamilyFilter === family && (
+                            <Check className="h-3.5 w-3.5 text-primary" />
+                          )}
+                        </div>
+                      </DropdownMenuItem>
+                    ));
+                  })()}
+                </div>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Sort / Column toggle */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className={`h-8 w-8 shrink-0 transition-colors sm:ml-auto sm:h-10 sm:w-10 ${sortOption ? "border-primary text-primary bg-primary/5" : ""}`}
                 >
-                  {column.id}
-                </DropdownMenuCheckboxItem>
-              ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+                  <SlidersHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuLabel className="flex items-center justify-between">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Sort
+                  </span>
+                  {sortOption && (
+                    <button
+                      type="button"
+                      onClick={() => setSortOption(null)}
+                      className="text-[10px] text-primary hover:underline font-medium"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </DropdownMenuLabel>
+                {[
+                  {
+                    key: "alpha-asc" as const,
+                    icon: (
+                      <ArrowUpAZ className="h-3.5 w-3.5 mr-2 text-muted-foreground shrink-0" />
+                    ),
+                    label: "Alphabetically A → Z",
+                  },
+                  {
+                    key: "alpha-desc" as const,
+                    icon: (
+                      <ArrowDownAZ className="h-3.5 w-3.5 mr-2 text-muted-foreground shrink-0" />
+                    ),
+                    label: "Alphabetically Z → A",
+                  },
+                  {
+                    key: "recent-12h" as const,
+                    icon: (
+                      <Clock className="h-3.5 w-3.5 mr-2 text-muted-foreground shrink-0" />
+                    ),
+                    label: "Recently Added (12h)",
+                  },
+                  {
+                    key: "newest" as const,
+                    icon: (
+                      <ArrowDown className="h-3.5 w-3.5 mr-2 text-muted-foreground shrink-0" />
+                    ),
+                    label: "Newest to Oldest",
+                  },
+                  {
+                    key: "oldest" as const,
+                    icon: (
+                      <ArrowUp className="h-3.5 w-3.5 mr-2 text-muted-foreground shrink-0" />
+                    ),
+                    label: "Oldest to Newest",
+                  },
+                ].map(({ key, icon, label }) => (
+                  <DropdownMenuCheckboxItem
+                    key={key}
+                    checked={
+                      sortOption === key ||
+                      (key === "newest" && sortOption === null)
+                    }
+                    onCheckedChange={() =>
+                      setSortOption((s) => (s === key ? null : key))
+                    }
+                  >
+                    {icon}
+                    {label}
+                  </DropdownMenuCheckboxItem>
+                ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Toggle Columns
+                </DropdownMenuLabel>
+                {table
+                  .getAllColumns()
+                  .filter((c) => c.getCanHide())
+                  .filter((c) => c.id !== "productFamilyFilter")
+                  .map((column) => (
+                    <DropdownMenuCheckboxItem
+                      key={column.id}
+                      className="capitalize"
+                      checked={column.getIsVisible()}
+                      onCheckedChange={(value) =>
+                        column.toggleVisibility(!!value)
+                      }
+                    >
+                      {column.id}
+                    </DropdownMenuCheckboxItem>
+                  ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
       </div>
 
       {/* Active filters display */}
@@ -4193,8 +4357,181 @@ function FullAllProductsView() {
         </div>
       )}
 
-      {/* Table */}
-      <div className="rounded-lg border">
+      {/* Mobile product cards */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:hidden">
+        {loading ? (
+          <div className="col-span-full flex h-48 items-center justify-center rounded-lg border">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          </div>
+        ) : mobileRows.length ? (
+          mobileRows.slice(0, mobileVisibleCount).map((row) => {
+            const product = row.original;
+            const codes = resolveItemCodes(product);
+            const imageUrl = product.mainImage;
+            const description =
+              product.itemDescription || product.name || "Untitled product";
+            const family =
+              product.productFamily || (product.categories as string);
+            const brands = Array.isArray(product.brands)
+              ? product.brands
+              : product.brand
+                ? [product.brand as string]
+                : [];
+            const pendingStatus = pendingMap.get(product.id) ?? null;
+            const isPendingDelete = pendingStatus === "delete";
+            const busy = !!pendingStatus;
+
+            return (
+              <article
+                key={row.id}
+                className="flex min-w-0 flex-col overflow-hidden rounded-lg border bg-card"
+              >
+                <div className="relative flex h-28 items-center justify-center border-b bg-muted/30 p-2">
+                  <Checkbox
+                    checked={row.getIsSelected()}
+                    onCheckedChange={(value) => row.toggleSelected(!!value)}
+                    aria-label={`Select ${description}`}
+                    className="absolute left-2 top-2 z-10 bg-background"
+                  />
+                  {imageUrl ? (
+                    <img
+                      src={imageUrl}
+                      alt={description}
+                      className="h-full w-full object-contain"
+                    />
+                  ) : (
+                    <Package className="h-10 w-10 text-muted-foreground/40" />
+                  )}
+                  {pendingStatus && (
+                    <span className="absolute right-2 top-2">
+                      <PendingRowIndicator status={pendingStatus} />
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex min-w-0 flex-1 flex-col gap-2 p-2.5">
+                  <button
+                    type="button"
+                    onClick={() => handleEdit(product)}
+                    className="line-clamp-2 min-h-10 text-left text-xs font-semibold leading-snug hover:text-primary"
+                    title={description}
+                  >
+                    {description}
+                  </button>
+
+                  <div className="min-w-0">
+                    <ItemCodesDisplay
+                      itemCodes={codes}
+                      size="sm"
+                      maxVisible={2}
+                    />
+                  </div>
+
+                  {family && (
+                    <p className="truncate text-[11px] text-muted-foreground">
+                      {family}
+                    </p>
+                  )}
+
+                  <div className="flex flex-wrap gap-1">
+                    {product.productClass && (
+                      <ProductClassBadge
+                        value={
+                          product.productClass as
+                            | "spf"
+                            | "standard"
+                            | "non-standard"
+                            | "usl"
+                        }
+                      />
+                    )}
+                    <ProductUsageBadge value={product.productUsage} />
+                  </div>
+
+                  {brands.length > 0 && (
+                    <p className="truncate text-[11px] text-muted-foreground">
+                      {brands.join(", ")}
+                    </p>
+                  )}
+
+                  <div className="mt-auto flex items-center justify-end gap-1 border-t pt-1">
+                    {product.tdsFileUrl && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-red-600 hover:bg-red-50"
+                        aria-label={`View TDS for ${description}`}
+                        onClick={() => setTdsPreviewProduct(product)}
+                      >
+                        <FileText className="h-4 w-4" />
+                      </Button>
+                    )}
+                    {userCanWrite && (
+                      <>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          aria-label={`Edit ${description}`}
+                          onClick={() => handleEdit(product)}
+                          disabled={isPendingDelete}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          aria-label={`Delete ${description}`}
+                          onClick={() => setDeleteTarget(product)}
+                          disabled={busy}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </article>
+            );
+          })
+        ) : (
+          <div className="col-span-full flex h-48 flex-col items-center justify-center gap-2 rounded-lg border text-muted-foreground">
+            <Package className="h-8 w-8" />
+            <p className="text-sm">
+              {sortOption === "recent-12h"
+                ? "No products added in the last 12 hours"
+                : "No products found"}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {!loading && mobileRows.length > mobileVisibleCount && (
+        <div className="flex flex-col items-center gap-1 lg:hidden">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() =>
+              setMobileVisibleCount((count) =>
+                Math.min(count + 12, mobileRows.length),
+              )
+            }
+          >
+            Load more products
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            Showing {Math.min(mobileVisibleCount, mobileRows.length)} of{" "}
+            {mobileRows.length}
+          </span>
+        </div>
+      )}
+
+      {/* Desktop table */}
+      <div className="hidden rounded-lg border lg:block">
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((hg) => (
@@ -4262,19 +4599,19 @@ function FullAllProductsView() {
       </div>
 
       {/* Pagination */}
-      <div className="flex items-center justify-between">
-        <div className="text-sm text-muted-foreground">
+      <div className="hidden flex-col gap-3 sm:flex-row sm:items-center sm:justify-between lg:flex">
+        <div className="text-xs text-muted-foreground sm:text-sm">
           {table.getSelectedRowModel().rows.length} of {data.length} row(s)
           selected
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-4">
           <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">Rows per page</span>
+            <span className="text-xs text-muted-foreground sm:text-sm">Rows per page</span>
             <Input
               type="number"
               min={1}
               max={500}
-              className="h-9 w-20 text-sm text-center"
+              className="h-9 w-16 text-sm text-center sm:w-20"
               value={rowsPerPageInput}
               onChange={(e) => setRowsPerPageInput(e.target.value)}
               onBlur={(e) => {
@@ -4349,7 +4686,16 @@ function FullAllProductsView() {
               </div>
             </header>
             <div className="flex flex-1 flex-col gap-4 p-4 pt-0">
-              {isEditing ? renderEditMode() : renderTableMode()}
+              {isRestoringEdit ? (
+                <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Restoring product editor...
+                </div>
+              ) : isEditing ? (
+                renderEditMode()
+              ) : (
+                renderTableMode()
+              )}
             </div>
           </SidebarInset>
         </SidebarProvider>

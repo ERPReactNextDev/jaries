@@ -186,25 +186,29 @@ const PRODUCT_CLASS_OPTIONS: {
     value: "spf",
     label: "SPF",
     description: "Special product family items",
-    activeClass: "border-violet-500 bg-violet-50 text-violet-700",
+    activeClass:
+      "border-violet-500 bg-violet-50 text-violet-700 dark:border-violet-400 dark:bg-violet-950/60 dark:text-violet-200",
   },
   {
     value: "standard",
     label: "Standard",
     description: "Regular inventory items",
-    activeClass: "border-slate-500 bg-slate-50 text-slate-700",
+    activeClass:
+      "border-slate-500 bg-slate-50 text-slate-700 dark:border-slate-400 dark:bg-slate-800 dark:text-slate-100",
   },
   {
     value: "non-standard",
     label: "Non-Standard",
     description: "Custom and special-order items",
-    activeClass: "border-amber-500 bg-amber-50 text-amber-700",
+    activeClass:
+      "border-amber-500 bg-amber-50 text-amber-700 dark:border-amber-400 dark:bg-amber-950/60 dark:text-amber-200",
   },
   {
     value: "usl",
     label: "USL",
     description: "USL-classified catalog items",
-    activeClass: "border-sky-500 bg-sky-50 text-sky-700",
+    activeClass:
+      "border-sky-500 bg-sky-50 text-sky-700 dark:border-sky-400 dark:bg-sky-950/60 dark:text-sky-200",
   },
 ];
 
@@ -1877,9 +1881,9 @@ export default function BulkUploader({
         </Button>
       </DialogTrigger>
 
-      <DialogContent className="sm:max-w-190 h-[88vh] flex flex-col p-0 overflow-hidden">
+      <DialogContent className="h-[90dvh] max-h-[90dvh] w-[calc(100%-1rem)] gap-0 overflow-hidden rounded-xl p-0 sm:h-[88vh] sm:max-h-[88vh] sm:w-full sm:max-w-190">
         {/* Header */}
-        <DialogHeader className="px-6 pt-5 pb-3 border-b shrink-0">
+        <DialogHeader className="shrink-0 border-b px-4 pb-3 pt-4 sm:px-6 sm:pt-5">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
               <PackagePlus className="w-5 h-5 text-primary" />
@@ -1899,7 +1903,7 @@ export default function BulkUploader({
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 mt-3 text-[11px] font-medium">
+          <div className="mt-3 grid grid-cols-4 items-center gap-1 text-[10px] font-medium sm:flex sm:gap-1.5 sm:text-[11px]">
             {STEPS.map((s, idx) => {
               const displayStep = step === "cancelled" ? "importing" : step;
               const isCancelledStep = step === "cancelled" && s === "importing";
@@ -1908,7 +1912,7 @@ export default function BulkUploader({
               return (
                 <React.Fragment key={s}>
                   <span
-                    className={`px-2 py-0.5 rounded-full transition-colors ${
+                    className={`flex min-w-0 items-center justify-center whitespace-nowrap rounded-full px-1.5 py-1 transition-colors sm:px-2 sm:py-0.5 ${
                       isCancelledStep
                         ? "bg-orange-500 text-white"
                         : isActive
@@ -1924,7 +1928,7 @@ export default function BulkUploader({
                       : s.charAt(0).toUpperCase() + s.slice(1)}
                   </span>
                   {idx < 3 && (
-                    <ChevronRight className="w-3 h-3 text-muted-foreground" />
+                    <ChevronRight className="hidden h-3 w-3 text-muted-foreground sm:block" />
                   )}
                 </React.Fragment>
               );
@@ -1937,9 +1941,9 @@ export default function BulkUploader({
           {/* IDLE */}
           {step === "idle" && (
             <div className="h-full overflow-y-auto">
-              <div className="p-6 space-y-5">
+              <div className="space-y-5 p-4 sm:p-6">
                 {/* Info about new schema */}
-                <div className="flex items-start gap-2 text-xs px-3 py-2.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-700">
+                <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 text-xs text-blue-700 dark:border-blue-400/30 dark:bg-blue-950/50 dark:text-blue-200">
                   <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
                   <div className="space-y-1">
                     <p className="font-semibold">Multi-brand item codes supported</p>
@@ -1960,7 +1964,7 @@ export default function BulkUploader({
 
                 <div
                   {...getRootProps()}
-                  className={`border-2 border-dashed rounded-2xl p-10 text-center flex flex-col items-center justify-center gap-3 transition-all duration-200 ${isDragActive ? "border-primary bg-primary/8 scale-[1.01] cursor-copy" : "border-border hover:border-primary/40 hover:bg-primary/3 cursor-pointer"}`}
+                  className={`flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed p-6 text-center transition-all duration-200 sm:p-10 ${isDragActive ? "scale-[1.01] cursor-copy border-primary bg-primary/8" : "cursor-pointer border-border hover:border-primary/40 hover:bg-primary/3"}`}
                 >
                   <input {...getInputProps()} />
                   <div
@@ -1997,11 +2001,11 @@ export default function BulkUploader({
                     <p className="text-[11px] text-muted-foreground">
                       This applies to all imported rows. Leave as <span className="font-semibold">Use Excel Value</span> to keep each row's class from the sheet.
                     </p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
                       <button
                         type="button"
                         onClick={() => setSelectedProductClass("")}
-                        className={`rounded-lg border-2 px-3 py-2 text-left transition-all ${selectedProductClass === "" ? "border-primary bg-primary/5 text-primary" : "border-border hover:border-muted-foreground/30 text-muted-foreground"}`}
+                        className={`rounded-lg border-2 px-3 py-2 text-left transition-all ${selectedProductClass === "" ? "border-primary bg-primary/5 text-primary dark:bg-primary/10" : "border-border text-muted-foreground hover:border-muted-foreground/30 hover:text-foreground"}`}
                       >
                         <p className="text-xs font-semibold">Use Excel Value</p>
                         <p className="text-[10px] opacity-75 mt-0.5">Read PRODUCT CLASS from each row</p>
@@ -2013,7 +2017,7 @@ export default function BulkUploader({
                             key={opt.value}
                             type="button"
                             onClick={() => setSelectedProductClass(opt.value)}
-                            className={`rounded-lg border-2 px-3 py-2 text-left transition-all ${active ? opt.activeClass : "border-border hover:border-muted-foreground/30 text-muted-foreground"}`}
+                            className={`rounded-lg border-2 px-3 py-2 text-left transition-all ${active ? opt.activeClass : "border-border text-muted-foreground hover:border-muted-foreground/30 hover:text-foreground"}`}
                           >
                             <p className="text-xs font-semibold">{opt.label}</p>
                             <p className="text-[10px] opacity-75 mt-0.5">{opt.description}</p>
@@ -2181,7 +2185,7 @@ export default function BulkUploader({
         </div>
 
         {/* Footer */}
-        <div className="border-t px-6 py-3 flex justify-between items-center shrink-0 bg-muted/20">
+        <div className="flex shrink-0 items-center justify-between border-t bg-muted/20 px-4 py-3 sm:px-6">
           <Button
             variant="ghost"
             size="sm"

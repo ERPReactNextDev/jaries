@@ -2,9 +2,9 @@
 
 import * as React from "react";
 import { useState } from "react";
-import Image from "next/image";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { BrandLogo } from "@/components/brand-logo";
 import {
   Card,
   CardContent,
@@ -294,8 +294,8 @@ export function RegisterForm({
     <Card className={cn("overflow-hidden", className)} {...props}>
       <CardHeader className="flex flex-col items-center gap-1 pb-4">
         <div className="relative">
-          <Image
-            src="/logo-full.png"
+          <BrandLogo
+            variant="full"
             alt="Logo"
             width={120}
             height={32}
