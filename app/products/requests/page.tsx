@@ -772,9 +772,9 @@ export default function ProductRequestsPage() {
               )}
 
               {/* Desktop table */}
-              <div className="hidden overflow-hidden rounded-lg border lg:block">
-                <Table>
-                  <TableHeader>
+              <div className="hidden max-h-[calc(100dvh-18rem)] overflow-y-auto rounded-lg border lg:block">
+                <Table containerClassName="overflow-visible">
+                  <TableHeader className="sticky top-0 z-20 bg-background shadow-sm [&_th]:bg-background">
                     <TableRow className="bg-muted/30">
                       {/* Checkbox column — verifiers only, selects pending rows */}
                       {isVerifier && (
